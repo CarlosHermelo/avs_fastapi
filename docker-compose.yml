@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: pami-assistant
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./config.ini:/app/config.ini
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    restart: unless-stopped
+    
+  # Si deseas agregar una base de datos u otros servicios, puedes incluirlos aquí
+  # Por ejemplo:
+  # db:
+  #   image: postgres:13
+  #   container_name: pami-db
+  #   environment:
+  #     - POSTGRES_USER=postgres
+  #     - POSTGRES_PASSWORD=postgres
+  #     - POSTGRES_DB=pami_db
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+
+# Si agregas un servicio de base de datos, descomenta esto:
+# volumes:
+#   postgres_data: 

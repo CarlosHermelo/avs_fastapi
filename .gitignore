@@ -1,0 +1,38 @@
+# Directorios específicos
+data/
+tot17/
+temp_project/
+tmp/
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Archivos de log
+*.log
+
+# Archivos de caché
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Archivos IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+
+# Archivos de Docker
+.dockerignore
+
+# Otros archivos
+*.bak
+*.tmp 
