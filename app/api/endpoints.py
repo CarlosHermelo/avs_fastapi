@@ -1,7 +1,7 @@
 # app/api/endpoints.py
 from fastapi import APIRouter, HTTPException, Depends
 from app.models.schemas import QuestionRequest, AnswerResponse, CompleteAnalysisRequest, CompleteAnalysisResponse
-from app.services.process_question import process_question
+from app.services.process_question import process_question, retrieve_stats
 from app.services.token_utils import contar_tokens, count_words, validar_palabras, reducir_contenido_por_palabras
 import json
 import os
@@ -40,15 +40,19 @@ def handle_question(request: QuestionRequest):
         request.k
     )
     
+    # Acceder a la misma instancia de RetrieveStats que se actualizó en process_question
+    document_count = retrieve_stats.document_count
+    
+    logger.info(f"[DEBUG-API] Documentos recuperados: {document_count}")
     logger.info(f"[DEBUG-API] Respuesta generada: {answer}")
-    return {"answer": answer}
-
-# Crear una clase para mantener el estado de los fragmentos recuperados
-class RetrieveStats:
-    def __init__(self):
-        self.document_count = 0
-        
-retrieve_stats = RetrieveStats()
+    
+    return {
+        "answer": answer,
+        "metadata": {
+            "document_count": document_count,
+            "model": model_name
+        }
+    }
 
 # Función para registrar un resumen de tokens
 def log_token_summary(tokens_entrada, tokens_salida, modelo):

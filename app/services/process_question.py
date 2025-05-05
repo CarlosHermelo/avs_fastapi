@@ -1,9 +1,9 @@
 # app/services/process_question.py
 from app.services.graph_logic import build_graph
-from app.services.token_utils import contar_tokens
+from app.services.token_utils import contar_tokens, validar_palabras, reducir_contenido_por_palabras, count_words
 from app.core.logging_config import log_message
 import traceback
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 import json
 import os
 import datetime
@@ -14,16 +14,20 @@ from langchain_core.prompts import PromptTemplate
 from app.core.config import model_name, max_results
 from app.core.logging_config import get_logger
 from app.core.dependencies import get_embeddings, get_qdrant_client, get_vector_store, get_llm
+from langgraph.graph import MessagesState, StateGraph
+from langgraph.prebuilt import ToolNode
 
 # Obtener el logger
 logger = get_logger()
 
-# Variable para llevar el conteo total de tokens por sesión
-session_token_stats = {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "fragments_count": 0
-}
+# Crear una clase para mantener el estado de los fragmentos recuperados
+class RetrieveStats:
+    def __init__(self):
+        self.document_count = 0
+        self.last_fragments_count = 0
+
+# Instanciar la clase RetrieveStats globalmente
+retrieve_stats = RetrieveStats()
 
 def process_question(question, fecha_desde=None, fecha_hasta=None, k=None):
     """
@@ -44,28 +48,18 @@ def process_question(question, fecha_desde=None, fecha_hasta=None, k=None):
         logger.info("="*80)
         logger.info(f"##############-------INICIO PROCESS_QUESTION----------#####################")
         
-        # Reiniciar estadísticas de tokens para esta sesión
-        session_token_stats["input_tokens"] = 0
-        session_token_stats["output_tokens"] = 0
-        session_token_stats["fragments_count"] = 0
+        # Inicializar contadores
+        retrieve_stats.document_count = 0
         
         # Registrar inicio del procesamiento con timestamp
         start_time = datetime.datetime.now()
         logger.info(f"[{start_time}] Procesando pregunta: {question}")
         
-        # Contar tokens de la pregunta inicial
-        question_tokens = contar_tokens(question, model_name)
-        session_token_stats["input_tokens"] += question_tokens
-        logger.info(f"Tokens de la pregunta inicial: {question_tokens}")
-        
-        # Información sobre fechas y parámetros
-        if fecha_desde or fecha_hasta:
-            logger.info(f"Filtro de fechas: desde {fecha_desde} hasta {fecha_hasta}")
-        
         # Obtener recursos desde las dependencias singleton
         embeddings = get_embeddings()
         qdrant_client = get_qdrant_client()
         vector_store = get_vector_store()
+        llm = get_llm()
         
         # Determinar valor k (número de documentos a recuperar)
         if k is None:
@@ -73,48 +67,114 @@ def process_question(question, fecha_desde=None, fecha_hasta=None, k=None):
         else:
             k = int(k)
         
-        # Buscar documentos relevantes - Log distintivo para esta sección
-        logger.info(f"########### RETRIEVE (Qdrant) --------#####################")
-        logger.info(f"Buscando documentos relevantes con k={k}")
+        # Función de retrieve adaptada para Qdrant
+        def retrieve(query: str):
+            """Recuperar información relacionada con la consulta usando Qdrant."""
+            logger.info(f"########### RETRIEVE (Qdrant) --------#####################")
+            
+            # Contamos tokens de la consulta
+            tokens_consulta = contar_tokens(query, model_name)
+            logger.info(f"Tokens de entrada en retrieve (consulta): {tokens_consulta}")
+            
+            # Usar valor k proporcionado
+            k_value = k
+            logger.info(f"Buscando documentos relevantes con k={k_value}")
+            
+            # Realizar búsqueda en Qdrant
+            try:
+                retrieved_docs = vector_store.similarity_search_with_score(query, k=k_value)
+                documentos_relevantes = [doc for doc, score in retrieved_docs]
+                cantidad_fragmentos = len(documentos_relevantes)
+                
+                # Guardamos la cantidad de fragmentos
+                retrieve_stats.document_count = cantidad_fragmentos
+                retrieve_stats.last_fragments_count = cantidad_fragmentos
+                
+                if not documentos_relevantes:
+                    logger.info("No se encontró información suficiente para responder la pregunta.")
+                    return "Lo siento, no tengo información suficiente para responder esa pregunta."
+                
+                # Formato detallado para el log
+                formatted_docs = "\n\n".join(
+                    (f"FRAGMENTO #{i+1}: {doc.page_content}\nMETADATA: {doc.metadata}\nSCORE: {score}")
+                    for i, (doc, score) in enumerate(retrieved_docs)
+                )
+                logger.info(f"Documentos recuperados:\n{formatted_docs}")
+                
+                serialized = "\n\n".join(
+                    (f"fFRAGMENTO{doc.page_content}\nMETADATA{doc.metadata}") for doc in documentos_relevantes
+                )
+                
+                # Contamos tokens de la respuesta de retrieve
+                tokens_respuesta_retrieve = contar_tokens(serialized, model_name)
+                logger.info(f"Fragmentos recuperados de Qdrant: {cantidad_fragmentos}")
+                logger.info(f"Tokens de salida en retrieve: {tokens_respuesta_retrieve}")
+                logger.info(f"Total tokens en retrieve: {tokens_consulta + tokens_respuesta_retrieve}")
+                
+                # Log del contenido completo recuperado (como en versión Chroma)
+                logger.info(f"WEB-RETREIVE----> :\n {serialized} \n----------END-WEB-RETRIEBE <")
+                
+                return serialized
+            except Exception as e:
+                error_msg = f"Error al realizar la búsqueda en Qdrant: {str(e)}"
+                logger.error(error_msg)
+                logger.error(traceback.format_exc())
+                return "Error al buscar en la base de datos: no se pudo recuperar información relevante."
         
-        # Contar tokens de la búsqueda
-        retrieval_input_tokens = contar_tokens(question, model_name)
-        logger.info(f"Tokens de entrada en retrieve (consulta): {retrieval_input_tokens}")
+        # Nodo 1: Generar consulta o responder directamente
+        def query_or_respond(state: MessagesState):
+            """Genera una consulta para la herramienta de recuperación o responde directamente."""
+            logger.info(f"########### QUERY OR RESPOND ---------#####################")
+            
+            # Contamos tokens de entrada
+            prompt_text = "\n".join([msg.content for msg in state["messages"]])
+            tokens_entrada_qor = contar_tokens(prompt_text, model_name)
+            logger.info(f"Tokens de entrada en query_or_respond: {tokens_entrada_qor}")
+            
+            # Log del mensaje completo
+            logger.info(f"Estado de mensajes entrante: {state}")
+            
+            llm_with_tools = llm.bind_tools([retrieve])
+            response = llm_with_tools.invoke(state["messages"])
+            
+            # Contamos tokens de salida
+            tokens_salida_qor = contar_tokens(response.content, model_name)
+            logger.info(f"Tokens de salida en query_or_respond: {tokens_salida_qor}")
+            logger.info(f"Total tokens en query_or_respond: {tokens_entrada_qor + tokens_salida_qor}")
+            
+            # Log de la respuesta completa
+            logger.info(f"Respuesta de query_or_respond: {response.content}")
+            
+            return {"messages": [response]}
         
-        # Realizar la búsqueda
-        retrieved_docs = vector_store.similarity_search_with_score(question, k=k)
+        # Nodo 2: Ejecutar la herramienta de recuperación
+        tools = ToolNode([retrieve])
         
-        # Procesar resultados
-        if not retrieved_docs:
-            logger.warning("No se encontraron documentos relevantes.")
-            return "No tengo la información suficiente del SIMAP para responderte en forma precisa tu pregunta."
-        
-        # Ordenar por score (menor score = mayor similitud)
-        retrieved_docs.sort(key=lambda x: x[1])
-        
-        # Extraer documentos y formatear el contexto
-        context = "\n\n".join([
-            f"FRAGMENTO: {doc.page_content}\n" +
-            f"METADATA: {doc.metadata}\n" +
-            f"SCORE: {score}"
-            for doc, score in retrieved_docs
-        ])
-        
-        # Guardar estadísticas de fragmentos
-        session_token_stats["fragments_count"] = len(retrieved_docs)
-        
-        # Log de contenido recuperado (similar a la versión Chroma)
-        logger.info(f"Se encontraron {len(retrieved_docs)} documentos relevantes.")
-        logger.info(f"WEB-RETREIVE----> :\n {context} \n----------END-WEB-RETRIEBE <")
-        
-        # Contar tokens del contexto
-        context_tokens = contar_tokens(context, model_name)
-        logger.info(f"Tokens del contexto: {context_tokens}")
-        session_token_stats["input_tokens"] += context_tokens
-        
-        # Definir la plantilla para el prompt con el formato completo y detallado
-        prompt_template = PromptTemplate.from_template(
-            """
+        # Nodo 3: Generar la respuesta final
+        def generate(state: MessagesState):
+            """Genera la respuesta final usando los documentos recuperados."""
+            logger.info(f"###########WEB-generate---------#####################")
+            
+            # Extraer mensajes de herramienta recientes
+            recent_tool_messages = [msg for msg in reversed(state["messages"]) if msg.type == "tool"]
+            logger.info(f"Mensajes de herramienta encontrados: {len(recent_tool_messages)}")
+            
+            docs_content = "\n\n".join(doc.content for doc in recent_tool_messages[::-1])
+            
+            # Log del contenido de documentos
+            logger.info(f"Contenido de documentos compilados:\n{docs_content[:1000]}... (truncado)")
+            
+            # Validar si los documentos contienen términos clave de la pregunta
+            user_question = state["messages"][0].content.lower()
+            terms = user_question.split()
+            
+            logger.info(f"Términos de búsqueda de la pregunta: {terms}")
+            
+            if not any(term in docs_content.lower() for term in terms):
+                logger.info("No se encontraron términos de la pregunta en los documentos, enviando respuesta genérica.")
+                return {"messages": [{"role": "assistant", "content": "Lo siento, no tengo información suficiente para responder esa pregunta."}]}
+            
+            system_message_content = ( """
 <CONTEXTO>
 La información proporcionada tiene como objetivo apoyar a los agentes que trabajan en las agencias de PAMI, quienes se encargan de atender las consultas de los afiliados. Este soporte está diseñado para optimizar la experiencia de atención al público y garantizar que los afiliados reciban información confiable y relevante en el menor tiempo posible.
 </CONTEXTO>
@@ -152,7 +212,7 @@ Estructura breve: Usa puntos clave, numeración o listas de una sola línea si e
 
 <CASOS_DE_PREGUNTA_RESPUESTA>
         <REQUISITOS>
-        Si la respuesta tiene requisitos listar **TODOS** los requisitos encontrados en el contexto no omitas incluso si aparecen en chunks distintos o al final de un fragmento. 
+        Si la respuesta tiene requisitos listar **TODOS** los requisitos encontrados en el contexto no omitas      incluso si aparecen en chunks distintos o al final de un fragmento. 
 **Ejemplo crítico**: Si un chunk menciona "DNI, recibo, credencial" y otro agrega "Boleta de luz ", DEBEN incluirse ambos.
                              
          **Advertencia**:
@@ -212,58 +272,159 @@ Estructura breve: Usa puntos clave, numeración o listas de una sola línea si e
       </EJEMPLO>
    </REFERENCIAS>
 </CASOS_DE_PREGUNTA_RESPUESTA>
-
-<DOCUMENTOS_RELEVANTES>
-{context}
-</DOCUMENTOS_RELEVANTES>
-
-<PREGUNTA>
-{question}
-</PREGUNTA>
-
-RESPUESTA:"""
-        )
+""" + docs_content)
+       
+            # Validar si excede el límite de palabras
+            es_valido, num_palabras = validar_palabras(system_message_content)
+            logger.info(f"Sistema message contiene {num_palabras} palabras. Válido: {es_valido}")
+            
+            if not es_valido:
+                # Reducir el contenido si es necesario
+                system_message_content = reducir_contenido_por_palabras(system_message_content)
+                logger.info(f"Se ha reducido el contenido a {count_words(system_message_content)} palabras.")
+                logger.info(f"WEB-CONTEXTO_QUEDO RESUMIDO ASI (system_message_content\n): {system_message_content[:1000]}... (truncado)")
+            
+            prompt = [SystemMessage(content=system_message_content)] + [
+                msg for msg in state["messages"] if msg.type in ("human", "system")
+            ]
+            
+            # Log del prompt completo
+            logger.info(f"WEB-PROMPT PROMPT ------>\n {prompt}--<")
+            
+            # Contamos tokens del prompt de entrada
+            prompt_text = system_message_content + "\n" + "\n".join([msg.content for msg in state["messages"] if msg.type in ("human", "system")])
+            tokens_entrada = contar_tokens(prompt_text, model_name)
+            logger.info(f"Tokens de entrada (prompt): {tokens_entrada}")
+            
+            # Realizamos la inferencia
+            logger.info(f"Generando respuesta final con modelo {model_name}")
+            response = llm.invoke(prompt)
+            
+            # Contamos tokens de la respuesta
+            tokens_salida = contar_tokens(response.content, model_name)
+            logger.info(f"Tokens de entrada (respuesta) DE PREGUNTA:: {tokens_entrada}")
+            logger.info(f"Tokens de salida (respuesta) DE PREGUNTA:: {tokens_salida}")
+            logger.info(f"Total tokens consumidos DE PREGUNTA: {tokens_entrada + tokens_salida}")
+            
+            # Log de la respuesta completa
+            logger.info(f"WEB-PROMPT RESPONSE ------>\n {response}--<")
+            
+            return {"messages": [response]}
         
-        # Preparar el prompt completo con los documentos relevantes
-        prompt = prompt_template.format(context=context, question=question)
+        # Construcción del gráfico de conversación
+        graph_builder = StateGraph(MessagesState)
+        graph_builder.add_node(query_or_respond)
+        graph_builder.add_node(tools)
+        graph_builder.add_node(generate)
+        graph_builder.set_entry_point("query_or_respond")
+        graph_builder.add_edge("query_or_respond", "tools")
+        graph_builder.add_edge("tools", "generate")
+        graph = graph_builder.compile()
         
-        # Contar tokens del prompt completo
-        prompt_tokens = contar_tokens(prompt, model_name)
-        logger.info(f"Tokens del prompt completo: {prompt_tokens}")
-        session_token_stats["input_tokens"] = prompt_tokens  # Actualizar con valor más preciso
+        # Procesar la pregunta
+        logger.info(f"##############-------PROCESANDO PROCESS_QUESTION----------#####################")
         
-        # Obtener el modelo LLM desde las dependencias
-        llm = get_llm()
+        # Preparar el mensaje con la pregunta y contexto
+        question_with_context = f"""
+Pregunta: {question}
+Periodo: desde {fecha_desde} hasta {fecha_hasta}
+"""
         
-        # Generar la respuesta - Log distintivo para esta sección
-        logger.info(f"########### GENERATE (LLM) --------#####################")
-        logger.info(f"Generando respuesta usando modelo {model_name}")
+        # Registramos tokens de la pregunta inicial
+        tokens_pregunta = contar_tokens(question_with_context, model_name)
+        logger.info(f"Tokens de la pregunta inicial: {tokens_pregunta}")
+        logger.info(f"Pregunta con contexto: {question_with_context}")
         
-        response = llm.invoke(prompt)
-        answer = response.content
+        # Preparar el mensaje para el grafo
+        human_message = HumanMessage(content=question_with_context)
         
-        # Contar tokens de la respuesta
-        answer_tokens = contar_tokens(answer, model_name)
-        session_token_stats["output_tokens"] = answer_tokens
-        logger.info(f"Tokens de la respuesta: {answer_tokens}")
+        # Iniciar el streaming del grafo
+        response_content = None
+        tokens_totales_entrada = tokens_pregunta
+        tokens_totales_salida = 0
         
-        # Calcular tiempo total de procesamiento
-        end_time = datetime.datetime.now()
-        processing_time = (end_time - start_time).total_seconds()
-        logger.info(f"Tiempo total de procesamiento: {processing_time:.2f} segundos")
-        
-        # Generar resumen de tokens
-        token_summary = log_token_summary(
-            session_token_stats["input_tokens"],
-            session_token_stats["output_tokens"],
-            session_token_stats["fragments_count"],
-            model_name
-        )
-        
-        logger.info(f"##############-------FIN PROCESS_QUESTION----------#####################")
-        logger.info("="*80)
-        
-        return answer
+        try:
+            # Diccionario para registrar tokens por cada nodo
+            tokens_por_nodo = {
+                "query_or_respond": {"entrada": 0, "salida": 0},
+                "tools": {"entrada": 0, "salida": 0},
+                "generate": {"entrada": 0, "salida": 0}
+            }
+            
+            logger.info(f"Iniciando ejecución del grafo LangGraph...")
+            
+            last_step = None
+            step_count = 0
+            for step in graph.stream(
+                {"messages": [human_message]},
+                stream_mode="values",
+                config={"configurable": {"thread_id": "user_question"}}
+            ):
+                step_count += 1
+                last_step = step
+                logger.info(f"Ejecutando paso {step_count} del grafo...")
+                
+                # Si hay mensajes y el último es del asistente, extraemos la respuesta
+                if "messages" in step and step["messages"]:
+                    assistant_messages = [msg for msg in step["messages"] 
+                                        if hasattr(msg, 'type') and msg.type == "ai" or
+                                            hasattr(msg, 'role') and msg.role == "assistant"]
+                    
+                    if assistant_messages:
+                        latest_assistant_msg = assistant_messages[-1]
+                        if hasattr(latest_assistant_msg, 'content'):
+                            response_content = latest_assistant_msg.content
+                            logger.info(f"Respuesta parcial actualizada en paso {step_count}")
+            
+            logger.info(f"Grafo completado con {step_count} pasos.")
+            
+            # Si no tenemos respuesta pero tenemos último paso
+            if response_content is None and last_step and "messages" in last_step:
+                logger.info("No se encontró respuesta en el streaming, buscando en el último paso...")
+                for msg in reversed(last_step["messages"]):
+                    if (hasattr(msg, 'type') and msg.type == "ai") or \
+                    (hasattr(msg, 'role') and msg.role == "assistant"):
+                        response_content = msg.content
+                        logger.info("Respuesta encontrada en el último paso")
+                        break
+            
+            # Si aún no hay respuesta
+            if response_content is None:
+                logger.info("No se pudo extraer ninguna respuesta del grafo. Usando respuesta genérica.")
+                response_content = "Lo siento, no se pudo generar una respuesta."
+            
+            # Registrar resultado
+            logger.info(f"Respuesta final generada, longitud: {len(response_content)}")
+            
+            # Calcular tiempo total y registrar resumen
+            end_time = datetime.datetime.now()
+            processing_time = (end_time - start_time).total_seconds()
+            logger.info(f"Tiempo total de procesamiento: {processing_time:.2f} segundos")
+            
+            # Calcular y registrar tokens totales
+            tokens_respuesta = contar_tokens(response_content, model_name)
+            logger.info(f"Tokens totales de entrada: {tokens_totales_entrada}")
+            logger.info(f"Tokens totales de salida: {tokens_respuesta}")
+            logger.info(f"Total general de tokens: {tokens_totales_entrada + tokens_respuesta}")
+            
+            # Registrar el resumen final
+            log_token_summary(
+                tokens_totales_entrada,
+                tokens_respuesta,
+                retrieve_stats.document_count,
+                model_name
+            )
+            
+            logger.info(f"##############-------FIN PROCESS_QUESTION----------#####################")
+            logger.info("="*80)
+            
+            return response_content
+            
+        except Exception as e:
+            error_msg = f"[ERROR] Error en el procesamiento del grafo: {str(e)}"
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            return "Lo siento, ocurrió un error al procesar tu pregunta. Por favor, inténtalo de nuevo más tarde."
     
     except Exception as e:
         error_msg = f"Error al procesar la pregunta: {str(e)}"
@@ -305,7 +466,7 @@ def log_token_summary(tokens_entrada, tokens_salida, fragmentos_count, modelo):
     logger.info(f"COSTO APROXIMADO USD: ${costo_aprox}")
     logger.info(separador)
     
-    # Guardar en formato JSON para análisis posterior (igual que en la versión Chroma)
+    # Guardar en formato JSON para análisis posterior
     resumen_json = {
         "timestamp": datetime.datetime.now().isoformat(),
         "model": modelo,
