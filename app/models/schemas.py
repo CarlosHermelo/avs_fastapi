@@ -3,20 +3,29 @@ from pydantic import BaseModel
 from typing import Dict, Any, Optional
 
 class QuestionRequest(BaseModel):
+    """
+    Modelo para las solicitudes de preguntas básicas
+    """
     question_input: str
-    fecha_desde: str
-    fecha_hasta: str
-    k: int
+    fecha_desde: str = "2023-01-01"
+    fecha_hasta: str = "2024-12-31"
+    k: int = 5
 
 class AnswerResponse(BaseModel):
+    """
+    Modelo para las respuestas básicas
+    """
     answer: str
 
 # Nuevos modelos para el endpoint de análisis completo
 class CompleteAnalysisRequest(BaseModel):
+    """
+    Modelo para las solicitudes de análisis completo
+    """
     question_input: str
-    fecha_desde: str
-    fecha_hasta: str
-    k: Optional[int] = 4
+    fecha_desde: str = "2023-01-01"
+    fecha_hasta: str = "2024-12-31"
+    k: Optional[int] = 5
 
 class AnalysisMetadata(BaseModel):
     document_count: int
@@ -26,5 +35,8 @@ class AnalysisMetadata(BaseModel):
     fecha_hasta: str
 
 class CompleteAnalysisResponse(BaseModel):
+    """
+    Modelo para las respuestas de análisis completo
+    """
     answer: str
-    metadata: AnalysisMetadata
+    metadata: Dict = {}

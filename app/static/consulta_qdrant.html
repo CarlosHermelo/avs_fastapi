@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Consulta PAMI - Qdrant</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: #f5f5f5;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #0064a4;
+            color: white;
+            border-radius: 5px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+        }
+        .form-panel {
+            background-color: white;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .response-panel {
+            background-color: white;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            min-height: 200px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        textarea {
+            height: 100px;
+            resize: vertical;
+        }
+        button {
+            background-color: #0064a4;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #004c7c;
+        }
+        .metadata {
+            margin-top: 20px;
+            font-size: 14px;
+            color: #666;
+        }
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #0064a4;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 2s linear infinite;
+            margin: 20px auto;
+            display: none;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .endpoint-selector {
+            display: flex;
+            margin-bottom: 15px;
+        }
+        .endpoint-option {
+            flex: 1;
+            text-align: center;
+            padding: 10px;
+            background-color: #e0e0e0;
+            cursor: pointer;
+            border-radius: 4px;
+            margin: 0 5px;
+        }
+        .endpoint-option.active {
+            background-color: #0064a4;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Consulta PAMI - Qdrant</h1>
+    </header>
+    <div class="container">
+        <div class="form-panel">
+            <div class="endpoint-selector">
+                <div class="endpoint-option active" id="simple-endpoint">Consulta Simple</div>
+                <div class="endpoint-option" id="complete-endpoint">Análisis Completo</div>
+            </div>
+            <form id="query-form">
+                <label for="question">Pregunta:</label>
+                <textarea id="question" name="question" required placeholder="Ingrese su consulta aquí..."></textarea>
+                
+                <div class="date-range">
+                    <div style="display: flex; gap: 10px;">
+                        <div style="flex: 1;">
+                            <label for="fecha-desde">Fecha Desde:</label>
+                            <input type="date" id="fecha-desde" name="fecha-desde" value="2023-01-01">
+                        </div>
+                        <div style="flex: 1;">
+                            <label for="fecha-hasta">Fecha Hasta:</label>
+                            <input type="date" id="fecha-hasta" name="fecha-hasta" value="2024-12-31">
+                        </div>
+                    </div>
+                </div>
+                
+                <label for="k-value">Cantidad de documentos (k):</label>
+                <select id="k-value" name="k-value">
+                    <option value="3">3</option>
+                    <option value="5" selected>5</option>
+                    <option value="7">7</option>
+                    <option value="10">10</option>
+                    <option value="15">15</option>
+                </select>
+                
+                <button type="submit" id="submit-btn">Enviar Consulta</button>
+            </form>
+        </div>
+        
+        <div class="response-panel">
+            <h2>Respuesta:</h2>
+            <div class="loader" id="loader"></div>
+            <div id="response-text"></div>
+            <div class="metadata" id="metadata"></div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('query-form');
+            const responseText = document.getElementById('response-text');
+            const metadataDiv = document.getElementById('metadata');
+            const loader = document.getElementById('loader');
+            const simpleEndpoint = document.getElementById('simple-endpoint');
+            const completeEndpoint = document.getElementById('complete-endpoint');
+            
+            let currentEndpoint = 'process_question'; // Valor por defecto
+            
+            // Cambiar entre endpoints
+            simpleEndpoint.addEventListener('click', function() {
+                simpleEndpoint.classList.add('active');
+                completeEndpoint.classList.remove('active');
+                currentEndpoint = 'process_question';
+                console.log('Endpoint cambiado a: process_question');
+            });
+            
+            completeEndpoint.addEventListener('click', function() {
+                completeEndpoint.classList.add('active');
+                simpleEndpoint.classList.remove('active');
+                currentEndpoint = 'complete_analysis';
+                console.log('Endpoint cambiado a: complete_analysis');
+            });
+            
+            form.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                
+                // Mostrar loader
+                loader.style.display = 'block';
+                responseText.innerHTML = '';
+                metadataDiv.innerHTML = '';
+                
+                const question = document.getElementById('question').value;
+                const fechaDesde = document.getElementById('fecha-desde').value;
+                const fechaHasta = document.getElementById('fecha-hasta').value;
+                const kValue = parseInt(document.getElementById('k-value').value);
+                
+                // Preparar los datos para la API
+                const data = {
+                    question_input: question,
+                    fecha_desde: fechaDesde,
+                    fecha_hasta: fechaHasta,
+                    k: kValue
+                };
+                
+                console.log(`Enviando solicitud a endpoint: /api/${currentEndpoint}`);
+                console.log('Datos enviados:', JSON.stringify(data));
+                
+                try {
+                    // Realizar la solicitud
+                    const response = await fetch(`/api/${currentEndpoint}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(data)
+                    });
+                    
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        console.error('Error en la respuesta:', errorText);
+                        throw new Error(`Error HTTP ${response.status}: ${errorText}`);
+                    }
+                    
+                    const responseData = await response.json();
+                    console.log('Respuesta recibida:', responseData);
+                    
+                    // Mostrar la respuesta
+                    responseText.innerHTML = responseData.answer.replace(/\n/g, '<br>');
+                    
+                    // Mostrar metadatos si existen
+                    if (responseData.metadata) {
+                        let metadataHTML = '<h3>Metadatos:</h3><ul>';
+                        for (const [key, value] of Object.entries(responseData.metadata)) {
+                            metadataHTML += `<li><strong>${key}:</strong> ${value}</li>`;
+                        }
+                        metadataHTML += '</ul>';
+                        metadataDiv.innerHTML = metadataHTML;
+                    }
+                } catch (error) {
+                    console.error('Error al procesar la solicitud:', error);
+                    responseText.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+                } finally {
+                    // Ocultar loader
+                    loader.style.display = 'none';
+                }
+            });
+        });
+    </script>
+</body>
+</html> 

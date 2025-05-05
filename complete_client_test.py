@@ -29,7 +29,7 @@ def query_complete_analysis(question, fecha_desde=None, fecha_hasta=None, k=None
         k = 4
         
     # URL del endpoint FastAPI
-    url = "http://localhost:8000/complete_analysis"
+    url = "http://localhost:8000/api/complete_analysis"
     
     # Datos de la solicitud
     payload = {

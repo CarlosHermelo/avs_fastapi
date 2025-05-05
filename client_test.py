@@ -1,13 +1,13 @@
-# client_test.py
+# client_test.py - Cliente para probar el endpoint process_question
 import requests
 import json
 
-# URL del endpoint FastAPI
-url = "http://localhost:8000/process_question"
+# URL del endpoint FastAPI (corregido para usar process_question)
+url = "http://localhost:8000/api/process_question"
 
 # Datos de prueba
 payload = {
-    "question_input": "¿como afilio  a mi pareja ?",
+    "question_input": "¿como es la afiliacion de la esposa de un afiliado ?",
     "fecha_desde": "2024-01-01",
     "fecha_hasta": "2024-12-31",
     "k": 4
@@ -27,6 +27,11 @@ if response.status_code == 200:
     print("[DEBUG] Respuesta completa:", json.dumps(response.json(), indent=2))
     print("Respuesta del asistente:\n")
     print(response.json()["answer"])
+    # Si hay metadata, mostrarla también
+    if "metadata" in response.json():
+        print("\nMetadata:")
+        print(f"Modelo: {response.json()['metadata'].get('model', 'No disponible')}")
+        print(f"Documentos recuperados: {response.json()['metadata'].get('document_count', 0)}")
 else:
     print(f"Error en la solicitud: {response.status_code}")
     print(response.text)

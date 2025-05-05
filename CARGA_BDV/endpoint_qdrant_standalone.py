@@ -1,8 +1,8 @@
-# app/api/endpoints.py
-from fastapi import APIRouter, HTTPException
-from app.models.schemas import QuestionRequest, AnswerResponse, CompleteAnalysisRequest, CompleteAnalysisResponse
-from app.services.process_question import process_question
-from app.services.token_utils import contar_tokens, count_words, validar_palabras, reducir_contenido_por_palabras
+"""
+Endpoint FastAPI standalone para usar Qdrant como base de datos vectorial
+"""
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 import json
 import os
 import configparser
@@ -16,31 +16,80 @@ from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langgraph.graph import MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
 from langchain_core.messages import SystemMessage, HumanMessage
-from app.core.config import model_name, collection_name_fragmento, qdrant_url, max_results, openai_api_key
-from app.core.logging_config import log_message, get_logger
 
-# Obtener el logger
-logger = get_logger()
+# Configuración de logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("api_qdrant.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("endpoint_qdrant")
 
-router = APIRouter(prefix="/api")
+def log_message(message, level="INFO"):
+    """Función simple para loguear mensajes"""
+    if level == "INFO":
+        logger.info(message)
+    elif level == "ERROR":
+        logger.error(message)
+    elif level == "WARNING":
+        logger.warning(message)
+    else:
+        logger.debug(message)
 
-@router.post("/process_question", response_model=AnswerResponse)
-def handle_question(request: QuestionRequest):
-    logger.info(f"[DEBUG-API] Recibida solicitud con datos: {request}")
-    logger.info(f"[DEBUG-API] Pregunta: {request.question_input}")
-    logger.info(f"[DEBUG-API] Fecha desde: {request.fecha_desde}")
-    logger.info(f"[DEBUG-API] Fecha hasta: {request.fecha_hasta}")
-    logger.info(f"[DEBUG-API] k: {request.k}")
+# Definición de modelos de datos
+class QuestionRequest(BaseModel):
+    question_input: str
+    fecha_desde: str = "2023-01-01"
+    fecha_hasta: str = "2024-12-31"
+    k: int = 5
+
+class AnswerResponse(BaseModel):
+    answer: str
+
+class CompleteAnalysisRequest(BaseModel):
+    question_input: str
+    fecha_desde: str = "2023-01-01"
+    fecha_hasta: str = "2024-12-31"
+    k: int = 5
+
+class CompleteAnalysisResponse(BaseModel):
+    answer: str
+    metadata: dict = {}
+
+# Cargar configuración
+def cargar_config_qdrant():
+    """Carga la configuración desde config.ini"""
+    # Posibles ubicaciones del archivo config.ini
+    posibles_rutas = [
+        'config.ini',                   # En el directorio actual
+        '../config.ini',                # En el directorio padre
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.ini'),  # En el mismo directorio
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config.ini')  # Directorio padre
+    ]
     
-    answer = process_question(
-        request.question_input,
-        request.fecha_desde,
-        request.fecha_hasta,
-        request.k
-    )
+    # Buscar el archivo en las posibles ubicaciones
+    config_path = None
+    for ruta in posibles_rutas:
+        if os.path.exists(ruta):
+            config_path = ruta
+            break
     
-    logger.info(f"[DEBUG-API] Respuesta generada: {answer}")
-    return {"answer": answer}
+    if not config_path:
+        raise FileNotFoundError("No se pudo encontrar el archivo config.ini")
+    
+    # Cargar la configuración
+    config = configparser.ConfigParser()
+    config.read(config_path)
+    
+    # Obtener los valores de configuración
+    qdrant_url = config['SERVICIOS_SIMAP_Q'].get('qdrant_url', 'http://localhost:6333')
+    collection_name = config['SERVICIOS_SIMAP_Q'].get('collection_name_fragmento', 'fragment_store')
+    model_name = config['DEFAULT'].get('modelo', 'gpt-3.5-turbo')
+    
+    return qdrant_url, collection_name, model_name
 
 # Crear una clase para mantener el estado de los fragmentos recuperados
 class RetrieveStats:
@@ -49,7 +98,39 @@ class RetrieveStats:
         
 retrieve_stats = RetrieveStats()
 
-# Función para registrar un resumen de tokens
+# Funciones auxiliares
+def contar_tokens(texto, modelo="gpt-3.5-turbo"):
+    try:
+        if modelo.startswith("gpt-4"):
+            codificador = tiktoken.encoding_for_model("gpt-4")
+        elif modelo.startswith("gpt-3.5"):
+            codificador = tiktoken.encoding_for_model("gpt-3.5-turbo")
+        else:
+            codificador = tiktoken.get_encoding("cl100k_base")
+        
+        tokens = len(codificador.encode(texto))
+        return tokens
+    except Exception as e:
+        log_message(f"Error al contar tokens: {str(e)}", level='ERROR')
+        return 0
+
+def count_words(text):
+    return len(text.split())
+
+def validar_palabras(prompt, max_palabras=10000):
+    num_palabras = count_words(prompt)
+    if num_palabras > max_palabras:
+        log_message(f"\nEl contenido supera el límite de {max_palabras} palabras ({num_palabras} palabras utilizadas).")
+        return False, num_palabras
+    return True, num_palabras
+
+def reducir_contenido_por_palabras(text, max_palabras=10000):
+    palabras = text.split()
+    if len(palabras) > max_palabras:
+        log_message("El contenido es demasiado largo, truncando...")
+        return " ".join(palabras[:max_palabras]) + "\n\n[Contenido truncado...]"
+    return text
+
 def log_token_summary(tokens_entrada, tokens_salida, modelo):
     cantidad_fragmentos = retrieve_stats.document_count
     
@@ -94,55 +175,185 @@ def log_token_summary(tokens_entrada, tokens_salida, modelo):
     
     return resumen_json
 
-# Endpoint actualizado para el análisis completo con Qdrant
-@router.post("/complete_analysis", response_model=CompleteAnalysisResponse)
-async def handle_complete_analysis(request: CompleteAnalysisRequest):
+# Función básica para procesar preguntas con Qdrant
+def process_question(question, fecha_desde=None, fecha_hasta=None, k=None):
     """
-    Endpoint que integra todo el proceso de análisis de texto completo
-    usando Qdrant como base de datos vectorial
+    Procesa una pregunta utilizando la base de datos vectorial Qdrant y
+    devuelve una respuesta generada por un modelo de lenguaje.
     """
-    # Línea divisoria para mejor visualización en logs
-    log_message("="*80)
-    log_message(f"##############-------INICIO COMPLETE_ANALYSIS (Qdrant)----------#####################")
-    log_message(f"[DEBUG-COMPLETE] Recibida solicitud completa con datos: {request}")
-    
-    # Registrar timestamp inicial
-    start_time = datetime.datetime.now()
-    log_message(f"Iniciando análisis completo a las: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    
     try:
-        # Inicializar contador de documentos
-        retrieve_stats.document_count = 0
+        # Registrar inicio del procesamiento
+        start_time = datetime.datetime.now()
+        logger.info(f"Procesando pregunta: {question}")
         
-        # Inicializar embeddings con la API key desde config
-        # Usar la API key cargada desde config.py en lugar de variables de entorno
-        api_key_prefix = openai_api_key[:10] if len(openai_api_key) > 10 else openai_api_key
-        log_message(f"Usando API key que comienza con: {api_key_prefix}...")
+        # Cargar configuración
+        qdrant_url, collection_name, model_name = cargar_config_qdrant()
         
+        # Inicializar embeddings
+        openai_api_key = os.environ.get('OPENAI_API_KEY')
         embeddings = OpenAIEmbeddings(api_key=openai_api_key)
         
         # Inicializar el cliente de Qdrant
-        log_message(f"Conectando a Qdrant en: {qdrant_url}")
         qdrant_client = QdrantClient(url=qdrant_url)
         
         # Verificar que la colección existe
         try:
-            qdrant_client.get_collection(collection_name_fragmento)
-            log_message(f"Colección {collection_name_fragmento} encontrada en Qdrant.")
+            qdrant_client.get_collection(collection_name)
+            logger.info(f"Colección {collection_name} encontrada en Qdrant.")
         except Exception as e:
-            error_msg = f"Error: La colección {collection_name_fragmento} no existe en Qdrant: {str(e)}"
+            error_msg = f"Error: La colección {collection_name} no existe en Qdrant: {str(e)}"
+            logger.error(error_msg)
+            return "Lo siento, no puedo procesar tu pregunta en este momento debido a un error en la base de datos."
+        
+        # Crear objeto Qdrant para búsqueda vectorial
+        vector_store = Qdrant(
+            client=qdrant_client,
+            collection_name=collection_name,
+            embeddings=embeddings
+        )
+        
+        # Determinar valor k (número de documentos a recuperar)
+        if k is None:
+            k = 4  # Valor por defecto
+        else:
+            k = int(k)
+        
+        # Buscar documentos relevantes
+        logger.info(f"Buscando documentos relevantes con k={k}")
+        retrieved_docs = vector_store.similarity_search_with_score(question, k=k)
+        
+        # Procesar resultados
+        if not retrieved_docs:
+            logger.warning("No se encontraron documentos relevantes.")
+            return "No tengo la información suficiente del SIMAP para responderte en forma precisa tu pregunta."
+        
+        # Extraer documentos y formatear el contexto
+        context = "\n\n".join([
+            f"FRAGMENTO: {doc.page_content}\n" +
+            f"METADATA: {doc.metadata}\n" +
+            f"SCORE: {score}"
+            for doc, score in retrieved_docs
+        ])
+        
+        logger.info(f"Se encontraron {len(retrieved_docs)} documentos relevantes.")
+        
+        # Crear el prompt para el modelo
+        prompt = f"""
+<CONTEXTO>
+La información proporcionada tiene como objetivo apoyar a los agentes que trabajan en las agencias de PAMI, 
+quienes se encargan de atender las consultas de los afiliados.
+</CONTEXTO>
+
+<ROL>
+Eres un asistente virtual experto en los servicios y trámites de PAMI.
+</ROL>
+
+<TAREA>
+Tu tarea es responder preguntas relacionadas con lo trámites y servicios que ofrece la obra social PAMI,
+basándote únicamente en los datos disponibles a continuación. Si la información no está disponible,
+debes decir 'No tengo esa información en este momento'.
+</TAREA>
+
+<REGLAS_CRÍTICAS>
+- **PROHIBIDO hacer inferencias, generalizaciones, deducciones o suposiciones sobre trámites, renovaciones, requisitos o períodos.**
+- Si no existe una afirmación explícita, clara y literal en el contexto, responde exactamente: 
+**"No tengo la informacion suficiente del SIMAP para responderte en forma precisa tu pregunta."**
+- Cada afirmación incluida en tu respuesta debe tener respaldo textual directo en el contexto.
+</REGLAS_CRÍTICAS>
+
+<DOCUMENTOS_RELEVANTES>
+{context}
+</DOCUMENTOS_RELEVANTES>
+
+<PREGUNTA>
+{question}
+</PREGUNTA>
+
+RESPUESTA:
+"""
+        
+        # Inicializar el modelo LLM
+        llm = ChatOpenAI(model=model_name, temperature=0, api_key=openai_api_key)
+        
+        # Generar respuesta
+        logger.info(f"Generando respuesta con modelo {model_name}")
+        llm_response = llm.invoke(prompt)
+        answer = llm_response.content
+        
+        # Calcular tiempo total de procesamiento
+        end_time = datetime.datetime.now()
+        processing_time = (end_time - start_time).total_seconds()
+        logger.info(f"Respuesta generada en {processing_time:.2f} segundos")
+        
+        return answer
+        
+    except Exception as e:
+        logger.error(f"Error al procesar la pregunta: {str(e)}", exc_info=True)
+        return "Ha ocurrido un error al procesar tu pregunta. Por favor, inténtalo de nuevo más tarde."
+
+# Inicializar la aplicación FastAPI
+app = FastAPI(title="API PAMI con Qdrant", 
+              description="API para consultas a la base de datos vectorial Qdrant",
+              version="1.0.0")
+
+@app.get("/")
+def read_root():
+    return {"message": "API de PAMI con Qdrant funcionando. Usar /docs para ver la documentación."}
+
+@app.post("/process_question", response_model=AnswerResponse)
+def handle_question(request: QuestionRequest):
+    """Endpoint simple para procesar preguntas"""
+    log_message(f"[DEBUG-API] Recibida solicitud con datos: {request}")
+    
+    answer = process_question(
+        request.question_input,
+        request.fecha_desde,
+        request.fecha_hasta,
+        request.k
+    )
+    
+    log_message(f"[DEBUG-API] Respuesta generada: {answer}")
+    return {"answer": answer}
+
+@app.post("/complete_analysis", response_model=CompleteAnalysisResponse)
+async def handle_complete_analysis(request: CompleteAnalysisRequest):
+    """
+    Endpoint que integra todo el proceso de análisis de texto completo
+    usando LangGraph y Qdrant
+    """
+    log_message(f"[DEBUG-COMPLETE] Recibida solicitud completa con datos: {request}")
+    
+    try:
+        # Cargar configuración
+        qdrant_url, collection_name, model_name = cargar_config_qdrant()
+        
+        # Inicializar contador de documentos
+        retrieve_stats.document_count = 0
+        
+        # Embeddings y conexión a Qdrant
+        openai_api_key = os.environ.get('OPENAI_API_KEY')
+        embeddings = OpenAIEmbeddings(api_key=openai_api_key)
+        
+        # Inicializar cliente Qdrant
+        qdrant_client = QdrantClient(url=qdrant_url)
+        
+        # Verificar que la colección existe
+        try:
+            qdrant_client.get_collection(collection_name)
+            log_message(f"Colección {collection_name} encontrada en Qdrant.")
+        except Exception as e:
+            error_msg = f"Error: La colección {collection_name} no existe en Qdrant: {str(e)}"
             log_message(error_msg, level='ERROR')
             raise HTTPException(status_code=500, detail=error_msg)
         
         # Crear objeto Qdrant para búsqueda vectorial
         vector_store = Qdrant(
             client=qdrant_client,
-            collection_name=collection_name_fragmento,
+            collection_name=collection_name,
             embeddings=embeddings
         )
         
-        # Inicializar el modelo LLM con la API key desde config
-        log_message(f"Inicializando modelo LLM: {model_name}")
+        # Inicializar el modelo LLM
         llm = ChatOpenAI(model=model_name, temperature=0, api_key=openai_api_key)
         
         # Función de retrieve adaptada para Qdrant
@@ -154,9 +365,8 @@ async def handle_complete_analysis(request: CompleteAnalysisRequest):
             tokens_consulta = contar_tokens(query, model_name)
             log_message(f"Tokens de entrada en retrieve (consulta): {tokens_consulta}")
             
-            # Usar valor k del request o el valor por defecto
-            k_value = request.k if request.k else max_results
-            log_message(f"Buscando documentos relevantes con k={k_value}")
+            # Usar valor k del request
+            k_value = request.k if request.k else 4
             
             # Realizar búsqueda en Qdrant
             try:
@@ -171,13 +381,6 @@ async def handle_complete_analysis(request: CompleteAnalysisRequest):
                     log_message("No se encontró información suficiente para responder la pregunta.")
                     return "Lo siento, no tengo información suficiente para responder esa pregunta."
                 
-                # Formato detallado para el log
-                formatted_docs = "\n\n".join(
-                    (f"FRAGMENTO #{i+1}: {doc.page_content}\nMETADATA: {doc.metadata}\nSCORE: {score}")
-                    for i, (doc, score) in enumerate(retrieved_docs)
-                )
-                log_message(f"Documentos recuperados:\n{formatted_docs}")
-                
                 serialized = "\n\n".join(
                     (f"fFRAGMENTO{doc.page_content}\nMETADATA{doc.metadata}") for doc in documentos_relevantes
                 )
@@ -188,14 +391,10 @@ async def handle_complete_analysis(request: CompleteAnalysisRequest):
                 log_message(f"Tokens de salida en retrieve: {tokens_respuesta_retrieve}")
                 log_message(f"Total tokens en retrieve: {tokens_consulta + tokens_respuesta_retrieve}")
                 
-                # Log del contenido completo recuperado (como en versión Chroma)
-                log_message(f"WEB-RETREIVE----> :\n {serialized} \n----------END-WEB-RETRIEBE <")
-                
                 return serialized
             except Exception as e:
                 error_msg = f"Error al realizar la búsqueda en Qdrant: {str(e)}"
                 log_message(error_msg, level='ERROR')
-                log_message(traceback.format_exc(), level='ERROR')
                 return "Error al buscar en la base de datos: no se pudo recuperar información relevante."
         
         # Nodo 1: Generar consulta o responder directamente
@@ -208,19 +407,12 @@ async def handle_complete_analysis(request: CompleteAnalysisRequest):
             tokens_entrada_qor = contar_tokens(prompt_text, model_name)
             log_message(f"Tokens de entrada en query_or_respond: {tokens_entrada_qor}")
             
-            # Log del mensaje completo
-            log_message(f"Estado de mensajes entrante: {state}")
-            
             llm_with_tools = llm.bind_tools([retrieve])
             response = llm_with_tools.invoke(state["messages"])
             
             # Contamos tokens de salida
             tokens_salida_qor = contar_tokens(response.content, model_name)
             log_message(f"Tokens de salida en query_or_respond: {tokens_salida_qor}")
-            log_message(f"Total tokens en query_or_respond: {tokens_entrada_qor + tokens_salida_qor}")
-            
-            # Log de la respuesta completa
-            log_message(f"Respuesta de query_or_respond: {response.content}")
             
             return {"messages": [response]}
         
@@ -231,142 +423,50 @@ async def handle_complete_analysis(request: CompleteAnalysisRequest):
         def generate(state: MessagesState):
             """Genera la respuesta final usando los documentos recuperados."""
             log_message(f"###########WEB-generate---------#####################")
-            
-            # Extraer mensajes de herramienta recientes
             recent_tool_messages = [msg for msg in reversed(state["messages"]) if msg.type == "tool"]
-            log_message(f"Mensajes de herramienta encontrados: {len(recent_tool_messages)}")
-            
             docs_content = "\n\n".join(doc.content for doc in recent_tool_messages[::-1])
-            
-            # Log del contenido de documentos
-            log_message(f"Contenido de documentos compilados:\n{docs_content[:1000]}... (truncado)")
             
             # Validar si los documentos contienen términos clave de la pregunta
             user_question = state["messages"][0].content.lower()
             terms = user_question.split()
             
-            log_message(f"Términos de búsqueda de la pregunta: {terms}")
-            
             if not any(term in docs_content.lower() for term in terms):
-                log_message("No se encontraron términos de la pregunta en los documentos, enviando respuesta genérica.")
                 return {"messages": [{"role": "assistant", "content": "Lo siento, no tengo información suficiente para responder esa pregunta."}]}
             
-            system_message_content = ( """
+            system_message_content = ("""
 <CONTEXTO>
-La información proporcionada tiene como objetivo apoyar a los agentes que trabajan en las agencias de PAMI, quienes se encargan de atender las consultas de los afiliados. Este soporte está diseñado para optimizar la experiencia de atención al público y garantizar que los afiliados reciban información confiable y relevante en el menor tiempo posible.
+La información proporcionada tiene como objetivo apoyar a los agentes que trabajan en las agencias de PAMI, 
+quienes se encargan de atender las consultas de los afiliados.
 </CONTEXTO>
 
 <ROL>
  Eres un asistente virtual experto en los servicios y trámites de PAMI.
 </ROL>
+
 <TAREA>
-   Tu tarea es responder preguntas relacionadas con lo trámites y servicios que ofrece la obra social PAMI, basándote únicamente en los datos disponibles en la base de datos vectorial. Si la información no está disponible, debes decir 'No tengo esa información en este momento'.
+   Tu tarea es responder preguntas relacionadas con lo trámites y servicios que ofrece la obra social PAMI, 
+   basándote únicamente en los datos disponibles en la base de datos vectorial. 
+   Si la información no está disponible, debes decir 'No tengo esa información en este momento'.
 </TAREA>
+
 <REGLAS_CRÍTICAS>
 - **PROHIBIDO hacer inferencias, generalizaciones, deducciones o suposiciones sobre trámites, renovaciones, requisitos o períodos.**
-- Si no existe una afirmación explícita, clara y literal en el contexto, responde exactamente: **"No tengo la informacion suficiente del SIMAP para responderte en forma precisa tu pregunta."**
+- Si no existe una afirmación explícita, clara y literal en el contexto, responde exactamente: 
+  **"No tengo la informacion suficiente del SIMAP para responderte en forma precisa tu pregunta."**
 - Cada afirmación incluida en tu respuesta debe tener respaldo textual directo en el contexto.
 </REGLAS_CRÍTICAS>
-<MODO_RESPUESTA>
-<EXPLICACIÓN>
-En tu respuesta debes:
-Ser breve y directa: Proporciona la información en un formato claro y conciso, enfocándote en los pasos esenciales o la acción principal que debe tomarse.
-Ser accionable: Prioriza el detalle suficiente para que el agente pueda transmitir la solución al afiliado rápidamente o profundizar si es necesario.
-
-Evitar información innecesaria: Incluye solo los datos más relevantes para resolver la consulta. Si hay pasos opcionales o detalles adicionales, indícalos solo si son críticos.
-Estructura breve: Usa puntos clave, numeración o listas de una sola línea si es necesario.
-
-</EXPLICACION> 
-   <EJEMPLO_MODO_RESPUESTA>
-      <PREGUNTA>
-         ¿Cómo tramitar la insulina tipo glargina?
-      </PREGUNTA>
-      <RESPUESTA>
-         PAMI cubre al 100% la insulina tipo Glargina para casos especiales, previa autorización por vía de excepción. Para gestionarla, se debe presentar el Formulario de Insulinas por Vía de Excepción (INICIO o RENOVACIÓN) firmado por el médico especialista, acompañado de los últimos dos análisis de sangre completos (hemoglobina glicosilada y glucemia, firmados por un bioquímico), DNI, credencial de afiliación y receta electrónica. La solicitud se presenta en la UGL o agencia de PAMI y será evaluada por Nivel Central en un plazo de 72 horas. La autorización tiene una vigencia de 12 meses.
-      </RESPUESTA>
-   </EJEMPLO_MODO_RESPUESTA>
-</MODO_RESPUESTA>
-
-<CASOS_DE_PREGUNTA_RESPUESTA>
-        <REQUISITOS>
-        Si la respuesta tiene requisitos listar **TODOS** los requisitos encontrados en el contexto no omitas      incluso si aparecen en chunks distintos o al final de un fragmento. 
-**Ejemplo crítico**: Si un chunk menciona "DNI, recibo, credencial" y otro agrega "Boleta de luz ", DEBEN incluirse ambos.
-                             
-         **Advertencia**:
-          Si faltan requisitos del contexto en tu respuesta, se considerará ERROR GRAVE.                         
-        </REQUISITOS>
-       
-   <IMPORTANTES_Y_EXCEPCIONES>
-      Si los servicios o trámites tienen EXCEPCIONES, aclaraciones o detalles IMPORTANTES, EXCLUSIONES, menciónalos en tu respuesta.
-        <EJEMPLO>
-           ### Exclusiones:
-            Afiliados internados en geriaticos privados
-           ### Importante
-            La orden tiene un vencimiento de 90 dias
-           ### Excepciones
-            Las solicitudes por vulnerabilidad no tendrán vencimiento
-        </EJEMPLO>                      
-   </IMPORTANTES_Y_EXCEPCIONES>
-
-   <TRAMITES_NO_DISPONIBLES>
-      <EXPLICACION>
-         Si la pregunta es sobre un trámite o servicio que no está explícitamente indicado en la base de datos vectorial, menciona que no existe ese trámite o servicio.
-      </EXPLICACION>
-      <EJEMPLO>
-         <PREGUNTA>
-            ¿Cómo puede un afiliado solicitar un descuento por anteojos?
-         </PREGUNTA>
-         <RESPUESTA>
-            PAMI no brinda un descuento por anteojos,Por lo tanto, si el afiliado decide comprar los anteojos por fuera de la red de ópticas de PAMI, no será posible solicitar un reintegro.
-         </RESPUESTA>
-      </EJEMPLO>
-   </TRAMITES_NO_DISPONIBLES>
-
-   <CALCULOS_NUMERICOS>
-      <EXPLICACION>
-         Si la pregunta involucra un cálculo o comparación numérica, evalúa aritméticamente para responderla.
-      </EXPLICACION>
-      <EJEMPLO>
-         - Si se dice "menor a 10", es un número entre 1 y 9.
-         - Si se dice "23", es un número entre 21 y 24.
-      </EJEMPLO>
-   </CALCULOS_NUMERICOS>
-
-   <FORMATO_RESPUESTA>
-      <EXPLICACION>
-         Presenta la información en formato de lista Markdown si es necesario.
-      </EXPLICACION>
-   </FORMATO_RESPUESTA>
-
-   <REFERENCIAS>
-      <EXPLICACION>
-         Al final de tu respuesta, incluye siempre un apartado titulado **Referencias** que contenga combinaciones únicas de **ID_SUB** y **SUBTIPO**, más un link con la siguiente estructura:
-      </EXPLICACION>
-      <EJEMPLO>
-         Referencias:
-         - ID_SUB = 347 | SUBTIPO = 'Traslados Programados'
-         - LINK = https://simap.pami.org.ar/subtipo_detalle.php?id_sub=347
-      </EJEMPLO>
-   </REFERENCIAS>
-</CASOS_DE_PREGUNTA_RESPUESTA>
 """ + docs_content)
-       
+            
             # Validar si excede el límite de palabras
             es_valido, num_palabras = validar_palabras(system_message_content)
-            log_message(f"Sistema message contiene {num_palabras} palabras. Válido: {es_valido}")
-            
             if not es_valido:
                 # Reducir el contenido si es necesario
                 system_message_content = reducir_contenido_por_palabras(system_message_content)
                 log_message(f"Se ha reducido el contenido a {count_words(system_message_content)} palabras.")
-                log_message(f"WEB-CONTEXTO_QUEDO RESUMIDO ASI (system_message_content\n): {system_message_content[:1000]}... (truncado)")
             
             prompt = [SystemMessage(content=system_message_content)] + [
                 msg for msg in state["messages"] if msg.type in ("human", "system")
             ]
-            
-            # Log del prompt completo
-            log_message(f"WEB-PROMPT PROMPT ------>\n {prompt}--<")
             
             # Contamos tokens del prompt de entrada
             prompt_text = system_message_content + "\n" + "\n".join([msg.content for msg in state["messages"] if msg.type in ("human", "system")])
@@ -374,20 +474,15 @@ Estructura breve: Usa puntos clave, numeración o listas de una sola línea si e
             log_message(f"Tokens de entrada (prompt): {tokens_entrada}")
             
             # Realizamos la inferencia
-            log_message(f"Generando respuesta final con modelo {model_name}")
             response = llm.invoke(prompt)
             
             # Contamos tokens de la respuesta
             tokens_salida = contar_tokens(response.content, model_name)
-            log_message(f"Tokens de entrada (respuesta) DE PREGUNTA:: {tokens_entrada}")
-            log_message(f"Tokens de salida (respuesta) DE PREGUNTA:: {tokens_salida}")
-            log_message(f"Total tokens consumidos DE PREGUNTA: {tokens_entrada + tokens_salida}")
+            log_message(f"Tokens de salida (respuesta): {tokens_salida}")
+            log_message(f"Total tokens consumidos: {tokens_entrada + tokens_salida}")
             
             # Añadimos un resumen del conteo de tokens
-            token_summary = log_token_summary(tokens_entrada, tokens_salida, model_name)
-            
-            # Log de la respuesta completa
-            log_message(f"WEB-PROMPT RESPONSE ------>\n {response}--<")
+            log_token_summary(tokens_entrada, tokens_salida, model_name)
             
             return {"messages": [response]}
         
@@ -402,9 +497,9 @@ Estructura breve: Usa puntos clave, numeración o listas de una sola línea si e
         graph = graph_builder.compile()
         
         # Procesar la pregunta
-        log_message(f"##############-------PROCESANDO COMPLETE_ANALYSIS (Qdrant)----------#####################")
+        log_message(f"##############-------COMPLETE_ANALYSIS (Qdrant)----------#####################")
         
-        # Preparar el mensaje con la pregunta y contexto
+        # Construir mensaje con contexto incluido
         question_with_context = f"""
 Pregunta: {request.question_input}
 Periodo: desde {request.fecha_desde} hasta {request.fecha_hasta}
@@ -413,7 +508,6 @@ Periodo: desde {request.fecha_desde} hasta {request.fecha_hasta}
         # Registramos tokens de la pregunta inicial
         tokens_pregunta = contar_tokens(question_with_context, model_name)
         log_message(f"Tokens de la pregunta inicial: {tokens_pregunta}")
-        log_message(f"Pregunta con contexto: {question_with_context}")
         
         # Preparar el mensaje para el grafo
         human_message = HumanMessage(content=question_with_context)
@@ -426,25 +520,13 @@ Periodo: desde {request.fecha_desde} hasta {request.fecha_hasta}
             tokens_totales_entrada = tokens_pregunta
             tokens_totales_salida = 0
             
-            # Diccionario para registrar tokens por cada nodo
-            tokens_por_nodo = {
-                "query_or_respond": {"entrada": 0, "salida": 0},
-                "tools": {"entrada": 0, "salida": 0},
-                "generate": {"entrada": 0, "salida": 0}
-            }
-            
-            log_message(f"Iniciando ejecución del grafo LangGraph...")
-            
             last_step = None
-            step_count = 0
             for step in graph.stream(
                 {"messages": [human_message]},
                 stream_mode="values",
                 config={"configurable": {"thread_id": "user_question"}}
             ):
-                step_count += 1
                 last_step = step
-                log_message(f"Ejecutando paso {step_count} del grafo...")
                 
                 # Si hay mensajes y el último es del asistente, extraemos la respuesta
                 if "messages" in step and step["messages"]:
@@ -456,41 +538,21 @@ Periodo: desde {request.fecha_desde} hasta {request.fecha_hasta}
                         latest_assistant_msg = assistant_messages[-1]
                         if hasattr(latest_assistant_msg, 'content'):
                             response_content = latest_assistant_msg.content
-                            log_message(f"Respuesta parcial actualizada en paso {step_count}")
-            
-            log_message(f"Grafo completado con {step_count} pasos.")
             
             # Si no tenemos respuesta pero tenemos último paso
             if response_content is None and last_step and "messages" in last_step:
-                log_message("No se encontró respuesta en el streaming, buscando en el último paso...")
                 for msg in reversed(last_step["messages"]):
                     if (hasattr(msg, 'type') and msg.type == "ai") or \
                     (hasattr(msg, 'role') and msg.role == "assistant"):
                         response_content = msg.content
-                        log_message("Respuesta encontrada en el último paso")
                         break
             
             # Si aún no hay respuesta
             if response_content is None:
-                log_message("No se pudo extraer ninguna respuesta del grafo. Usando respuesta genérica.")
                 response_content = "Lo siento, no se pudo generar una respuesta."
             
             # Registrar resultado
-            log_message(f"Respuesta final generada, longitud: {len(response_content)}")
-            
-            # Calcular tiempo total y registrar resumen
-            end_time = datetime.datetime.now()
-            processing_time = (end_time - start_time).total_seconds()
-            log_message(f"Tiempo total de procesamiento: {processing_time:.2f} segundos")
-            
-            # Calcular y registrar tokens totales
-            tokens_respuesta = contar_tokens(response_content, model_name)
-            log_message(f"Tokens totales de entrada: {tokens_totales_entrada}")
-            log_message(f"Tokens totales de salida: {tokens_respuesta}")
-            log_message(f"Total general de tokens: {tokens_totales_entrada + tokens_respuesta}")
-            
             log_message(f"##############-------FIN COMPLETE_ANALYSIS (Qdrant)----------#####################")
-            log_message("="*80)
             
             # Crear respuesta
             return {
@@ -501,11 +563,7 @@ Periodo: desde {request.fecha_desde} hasta {request.fecha_hasta}
                     "question": request.question_input,
                     "fecha_desde": request.fecha_desde,
                     "fecha_hasta": request.fecha_hasta,
-                    "vector_db": "Qdrant",
-                    "processing_time_seconds": processing_time,
-                    "tokens_in": tokens_totales_entrada,
-                    "tokens_out": tokens_respuesta,
-                    "tokens_total": tokens_totales_entrada + tokens_respuesta
+                    "vector_db": "Qdrant"
                 }
             }
             
@@ -518,3 +576,7 @@ Periodo: desde {request.fecha_desde} hasta {request.fecha_hasta}
         log_message(f"[ERROR-GENERAL] Error inesperado: {str(e)}", level="ERROR")
         log_message(traceback.format_exc(), level="ERROR")
         raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
+if __name__ == "__main__":
+    # Para probar localmente
+    print("Ejecuta este archivo con uvicorn: uvicorn endpoint_qdrant_standalone:app --host 0.0.0.0 --port 8000") 

@@ -4,91 +4,354 @@ from app.services.token_utils import contar_tokens
 from app.core.logging_config import log_message
 import traceback
 from langchain_core.messages import HumanMessage, AIMessage
+import json
+import os
+import datetime
+from qdrant_client import QdrantClient
+from langchain_qdrant import Qdrant
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_core.prompts import PromptTemplate
+from app.core.config import qdrant_url, collection_name_fragmento, model_name, max_results, openai_api_key
+from app.core.logging_config import get_logger
 
-def process_question(question_input: str, fecha_desde: str, fecha_hasta: str, k: int):
-    print(f"[DEBUG-PROCESS] Iniciando procesamiento de pregunta: {question_input}")
-    print(f"[DEBUG-PROCESS] Parámetros: fecha_desde={fecha_desde}, fecha_hasta={fecha_hasta}, k={k}")
+# Obtener el logger
+logger = get_logger()
+
+# Variable para llevar el conteo total de tokens por sesión
+session_token_stats = {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "fragments_count": 0
+}
+
+def process_question(question, fecha_desde=None, fecha_hasta=None, k=None):
+    """
+    Procesa una pregunta utilizando la base de datos vectorial Qdrant y
+    devuelve una respuesta generada por un modelo de lenguaje.
     
+    Args:
+        question (str): La pregunta del usuario
+        fecha_desde (str, optional): Fecha desde la cual filtrar resultados
+        fecha_hasta (str, optional): Fecha hasta la cual filtrar resultados
+        k (int, optional): Número máximo de documentos a recuperar
+        
+    Returns:
+        str: La respuesta generada
+    """
     try:
-        print("[DEBUG-PROCESS] Construyendo grafo...")
-        graph = build_graph()
-        print("[DEBUG-PROCESS] Grafo construido correctamente")
+        # Línea divisoria para mejor visualización en logs
+        logger.info("="*80)
+        logger.info(f"##############-------INICIO PROCESS_QUESTION----------#####################")
         
-        response = None
+        # Reiniciar estadísticas de tokens para esta sesión
+        session_token_stats["input_tokens"] = 0
+        session_token_stats["output_tokens"] = 0
+        session_token_stats["fragments_count"] = 0
         
-        # Construir mensaje con contexto incluido
-        question_with_context = f"""
-Pregunta: {question_input}
-Periodo: desde {fecha_desde} hasta {fecha_hasta}
-"""
-        print(f"[DEBUG-PROCESS] Pregunta con contexto: {question_with_context}")
+        # Registrar inicio del procesamiento con timestamp
+        start_time = datetime.datetime.now()
+        logger.info(f"[{start_time}] Procesando pregunta: {question}")
         
-        # Crear mensaje de usuario usando langchain_core.messages
-        user_message = HumanMessage(content=question_with_context)
+        # Contar tokens de la pregunta inicial
+        question_tokens = contar_tokens(question, model_name)
+        session_token_stats["input_tokens"] += question_tokens
+        logger.info(f"Tokens de la pregunta inicial: {question_tokens}")
         
-        # Preparar datos de entrada para el grafo
-        input_data = {
-            "messages": [user_message],
-            "config": {
-                "k": k,
-                "fecha_desde": fecha_desde, 
-                "fecha_hasta": fecha_hasta
-            }
-        }
-        print(f"[DEBUG-PROCESS] Datos de entrada al grafo: {input_data}")
+        # Información sobre fechas y parámetros
+        if fecha_desde or fecha_hasta:
+            logger.info(f"Filtro de fechas: desde {fecha_desde} hasta {fecha_hasta}")
         
-        print("[DEBUG-PROCESS] Comenzando streaming del grafo...")
+        # Usar la API key cargada desde config.py
+        # Imprimir los primeros caracteres de la API key para debug (no toda por seguridad)
+        api_key_prefix = openai_api_key[:10] if len(openai_api_key) > 10 else openai_api_key
+        logger.info(f"Usando API key que comienza con: {api_key_prefix}...")
+        
+        # Inicializar embeddings con la API key de config
+        embeddings = OpenAIEmbeddings(api_key=openai_api_key)
+        
+        # Inicializar el cliente de Qdrant
+        logger.info(f"Conectando a Qdrant en: {qdrant_url}")
+        qdrant_client = QdrantClient(url=qdrant_url)
+        
+        # Verificar que la colección existe
         try:
-            last_step = None
-            step_count = 0
-            for step in graph.stream(
-                input_data,
-                stream_mode="values",
-                config={"configurable": {"thread_id": "user_question", "k": k}},
-            ):
-                step_count += 1
-                print(f"[DEBUG-PROCESS] Paso {step_count} del grafo")
-                print(f"[DEBUG-PROCESS] Llaves en el step: {step.keys()}")
-                
-                # Guardar el último paso para extraer la respuesta final
-                last_step = step
-                
-                # Si hay mensajes, extraer el último que sea del asistente
-                if "messages" in step and step["messages"]:
-                    assistant_messages = [msg for msg in step["messages"] 
-                                         if hasattr(msg, 'type') and msg.type == "ai" or
-                                            hasattr(msg, 'role') and msg.role == "assistant"]
-                    
-                    if assistant_messages:
-                        latest_assistant_msg = assistant_messages[-1]
-                        if hasattr(latest_assistant_msg, 'content'):
-                            response = latest_assistant_msg.content
-                            print(f"[DEBUG-PROCESS] Respuesta actual: {response}")
-            
-            # Si al final no tenemos respuesta pero tenemos un último paso, intentar extraerla
-            if response is None and last_step and "messages" in last_step:
-                print("[DEBUG-PROCESS] Intentando extraer respuesta final del último paso")
-                for msg in reversed(last_step["messages"]):
-                    if (hasattr(msg, 'type') and msg.type == "ai") or \
-                       (hasattr(msg, 'role') and msg.role == "assistant"):
-                        response = msg.content
-                        print(f"[DEBUG-PROCESS] Respuesta final encontrada: {response}")
-                        break
-            
-            # Si aún no tenemos respuesta, usar un mensaje predeterminado
-            if response is None:
-                response = "Lo siento, no se pudo generar una respuesta. Por favor, inténtelo de nuevo."
-                print("[DEBUG-PROCESS] No se encontró respuesta en los mensajes del grafo")
-                
+            qdrant_client.get_collection(collection_name_fragmento)
+            logger.info(f"Colección {collection_name_fragmento} encontrada en Qdrant.")
         except Exception as e:
-            print(f"[DEBUG-PROCESS] Error en el streaming del grafo: {str(e)}")
-            print(f"[DEBUG-PROCESS] Detalles del error: {traceback.format_exc()}")
-            return f"Error: {str(e)}"
+            error_msg = f"Error: La colección {collection_name_fragmento} no existe en Qdrant: {str(e)}"
+            logger.error(error_msg)
+            return "Lo siento, no puedo procesar tu pregunta en este momento debido a un error en la base de datos."
         
-        print(f"[DEBUG-PROCESS] Respuesta final: {response}")
-        return response
+        # Crear objeto Qdrant para búsqueda vectorial
+        vector_store = Qdrant(
+            client=qdrant_client,
+            collection_name=collection_name_fragmento,
+            embeddings=embeddings
+        )
+        
+        # Determinar valor k (número de documentos a recuperar)
+        if k is None:
+            k = max_results  # Valor por defecto desde config
+        else:
+            k = int(k)
+        
+        # Buscar documentos relevantes - Log distintivo para esta sección
+        logger.info(f"########### RETRIEVE (Qdrant) --------#####################")
+        logger.info(f"Buscando documentos relevantes con k={k}")
+        
+        # Contar tokens de la búsqueda
+        retrieval_input_tokens = contar_tokens(question, model_name)
+        logger.info(f"Tokens de entrada en retrieve (consulta): {retrieval_input_tokens}")
+        
+        # Realizar la búsqueda
+        retrieved_docs = vector_store.similarity_search_with_score(question, k=k)
+        
+        # Procesar resultados
+        if not retrieved_docs:
+            logger.warning("No se encontraron documentos relevantes.")
+            return "No tengo la información suficiente del SIMAP para responderte en forma precisa tu pregunta."
+        
+        # Ordenar por score (menor score = mayor similitud)
+        retrieved_docs.sort(key=lambda x: x[1])
+        
+        # Extraer documentos y formatear el contexto
+        context = "\n\n".join([
+            f"FRAGMENTO: {doc.page_content}\n" +
+            f"METADATA: {doc.metadata}\n" +
+            f"SCORE: {score}"
+            for doc, score in retrieved_docs
+        ])
+        
+        # Guardar estadísticas de fragmentos
+        session_token_stats["fragments_count"] = len(retrieved_docs)
+        
+        # Log de contenido recuperado (similar a la versión Chroma)
+        logger.info(f"Se encontraron {len(retrieved_docs)} documentos relevantes.")
+        logger.info(f"WEB-RETREIVE----> :\n {context} \n----------END-WEB-RETRIEBE <")
+        
+        # Contar tokens del contexto
+        context_tokens = contar_tokens(context, model_name)
+        logger.info(f"Tokens del contexto: {context_tokens}")
+        session_token_stats["input_tokens"] += context_tokens
+        
+        # Definir la plantilla para el prompt con el formato completo y detallado
+        prompt_template = PromptTemplate.from_template(
+            """
+<CONTEXTO>
+La información proporcionada tiene como objetivo apoyar a los agentes que trabajan en las agencias de PAMI, quienes se encargan de atender las consultas de los afiliados. Este soporte está diseñado para optimizar la experiencia de atención al público y garantizar que los afiliados reciban información confiable y relevante en el menor tiempo posible.
+</CONTEXTO>
+
+<ROL>
+ Eres un asistente virtual experto en los servicios y trámites de PAMI.
+</ROL>
+<TAREA>
+   Tu tarea es responder preguntas relacionadas con lo trámites y servicios que ofrece la obra social PAMI, basándote únicamente en los datos disponibles en la base de datos vectorial. Si la información no está disponible, debes decir 'No tengo esa información en este momento'.
+</TAREA>
+<REGLAS_CRÍTICAS>
+- **PROHIBIDO hacer inferencias, generalizaciones, deducciones o suposiciones sobre trámites, renovaciones, requisitos o períodos.**
+- Si no existe una afirmación explícita, clara y literal en el contexto, responde exactamente: **"No tengo la informacion suficiente del SIMAP para responderte en forma precisa tu pregunta."**
+- Cada afirmación incluida en tu respuesta debe tener respaldo textual directo en el contexto.
+</REGLAS_CRÍTICAS>
+<MODO_RESPUESTA>
+<EXPLICACIÓN>
+En tu respuesta debes:
+Ser breve y directa: Proporciona la información en un formato claro y conciso, enfocándote en los pasos esenciales o la acción principal que debe tomarse.
+Ser accionable: Prioriza el detalle suficiente para que el agente pueda transmitir la solución al afiliado rápidamente o profundizar si es necesario.
+
+Evitar información innecesaria: Incluye solo los datos más relevantes para resolver la consulta. Si hay pasos opcionales o detalles adicionales, indícalos solo si son críticos.
+Estructura breve: Usa puntos clave, numeración o listas de una sola línea si es necesario.
+
+</EXPLICACION> 
+   <EJEMPLO_MODO_RESPUESTA>
+      <PREGUNTA>
+         ¿Cómo tramitar la insulina tipo glargina?
+      </PREGUNTA>
+      <RESPUESTA>
+         PAMI cubre al 100% la insulina tipo Glargina para casos especiales, previa autorización por vía de excepción. Para gestionarla, se debe presentar el Formulario de Insulinas por Vía de Excepción (INICIO o RENOVACIÓN) firmado por el médico especialista, acompañado de los últimos dos análisis de sangre completos (hemoglobina glicosilada y glucemia, firmados por un bioquímico), DNI, credencial de afiliación y receta electrónica. La solicitud se presenta en la UGL o agencia de PAMI y será evaluada por Nivel Central en un plazo de 72 horas. La autorización tiene una vigencia de 12 meses.
+      </RESPUESTA>
+   </EJEMPLO_MODO_RESPUESTA>
+</MODO_RESPUESTA>
+
+<CASOS_DE_PREGUNTA_RESPUESTA>
+        <REQUISITOS>
+        Si la respuesta tiene requisitos listar **TODOS** los requisitos encontrados en el contexto no omitas incluso si aparecen en chunks distintos o al final de un fragmento. 
+**Ejemplo crítico**: Si un chunk menciona "DNI, recibo, credencial" y otro agrega "Boleta de luz ", DEBEN incluirse ambos.
+                             
+         **Advertencia**:
+          Si faltan requisitos del contexto en tu respuesta, se considerará ERROR GRAVE.                         
+        </REQUISITOS>
+       
+   <IMPORTANTES_Y_EXCEPCIONES>
+      Si los servicios o trámites tienen EXCEPCIONES, aclaraciones o detalles IMPORTANTES, EXCLUSIONES, menciónalos en tu respuesta.
+        <EJEMPLO>
+           ### Exclusiones:
+            Afiliados internados en geriaticos privados
+           ### Importante
+            La orden tiene un vencimiento de 90 dias
+           ### Excepciones
+            Las solicitudes por vulnerabilidad no tendrán vencimiento
+        </EJEMPLO>                      
+   </IMPORTANTES_Y_EXCEPCIONES>
+
+   <TRAMITES_NO_DISPONIBLES>
+      <EXPLICACION>
+         Si la pregunta es sobre un trámite o servicio que no está explícitamente indicado en la base de datos vectorial, menciona que no existe ese trámite o servicio.
+      </EXPLICACION>
+      <EJEMPLO>
+         <PREGUNTA>
+            ¿Cómo puede un afiliado solicitar un descuento por anteojos?
+         </PREGUNTA>
+         <RESPUESTA>
+            PAMI no brinda un descuento por anteojos,Por lo tanto, si el afiliado decide comprar los anteojos por fuera de la red de ópticas de PAMI, no será posible solicitar un reintegro.
+         </RESPUESTA>
+      </EJEMPLO>
+   </TRAMITES_NO_DISPONIBLES>
+
+   <CALCULOS_NUMERICOS>
+      <EXPLICACION>
+         Si la pregunta involucra un cálculo o comparación numérica, evalúa aritméticamente para responderla.
+      </EXPLICACION>
+      <EJEMPLO>
+         - Si se dice "menor a 10", es un número entre 1 y 9.
+         - Si se dice "23", es un número entre 21 y 24.
+      </EJEMPLO>
+   </CALCULOS_NUMERICOS>
+
+   <FORMATO_RESPUESTA>
+      <EXPLICACION>
+         Presenta la información en formato de lista Markdown si es necesario.
+      </EXPLICACION>
+   </FORMATO_RESPUESTA>
+
+   <REFERENCIAS>
+      <EXPLICACION>
+         Al final de tu respuesta, incluye siempre un apartado titulado **Referencias** que contenga combinaciones únicas de **ID_SUB** y **SUBTIPO**, más un link con la siguiente estructura:
+      </EXPLICACION>
+      <EJEMPLO>
+         Referencias:
+         - ID_SUB = 347 | SUBTIPO = 'Traslados Programados'
+         - LINK = https://simap.pami.org.ar/subtipo_detalle.php?id_sub=347
+      </EJEMPLO>
+   </REFERENCIAS>
+</CASOS_DE_PREGUNTA_RESPUESTA>
+
+<DOCUMENTOS_RELEVANTES>
+{context}
+</DOCUMENTOS_RELEVANTES>
+
+<PREGUNTA>
+{question}
+</PREGUNTA>
+
+RESPUESTA:"""
+        )
+        
+        # Preparar el prompt completo con los documentos relevantes
+        prompt = prompt_template.format(context=context, question=question)
+        
+        # Log del prompt completo
+        logger.info(f"########### GENERATE ---------#####################")
+        logger.info(f"WEB-PROMPT----> :\n {prompt} \n----------END-WEB-PROMPT <")
+        
+        # Contabilizar tokens del prompt
+        prompt_tokens = contar_tokens(prompt, model_name)
+        logger.info(f"Tokens del prompt completo: {prompt_tokens}")
+        session_token_stats["input_tokens"] += prompt_tokens - context_tokens - question_tokens  # Evitar contar doble
+        
+        # Inicializar el modelo LLM usando la API key de config
+        logger.info(f"Generando respuesta con modelo {model_name}")
+        llm = ChatOpenAI(model=model_name, temperature=0, api_key=openai_api_key)
+        
+        # Generar respuesta
+        llm_response = llm.invoke(prompt)
+        answer = llm_response.content
+        
+        # Contar tokens de la respuesta
+        response_tokens = contar_tokens(answer, model_name)
+        session_token_stats["output_tokens"] += response_tokens
+        logger.info(f"Tokens de la respuesta: {response_tokens}")
+        
+        # Log de la respuesta completa
+        logger.info(f"WEB-RESPONSE----> :\n {answer} \n----------END-WEB-RESPONSE <")
+        
+        # Calcular tiempo total de procesamiento
+        end_time = datetime.datetime.now()
+        processing_time = (end_time - start_time).total_seconds()
+        logger.info(f"Respuesta generada en {processing_time:.2f} segundos")
+        
+        # Resumen de tokens
+        log_token_summary(
+            session_token_stats["input_tokens"], 
+            session_token_stats["output_tokens"], 
+            session_token_stats["fragments_count"],
+            model_name
+        )
+        
+        logger.info(f"##############-------FIN PROCESS_QUESTION----------#####################")
+        logger.info("="*80)
+        
+        return answer
+        
     except Exception as e:
-        print(f"[DEBUG-PROCESS] Error global: {str(e)}")
-        print(f"[DEBUG-PROCESS] Detalles del error: {traceback.format_exc()}")
-        return f"Error: {str(e)}"
+        logger.error(f"Error al procesar la pregunta: {str(e)}", exc_info=True)
+        logger.error(traceback.format_exc())
+        return "Ha ocurrido un error al procesar tu pregunta. Por favor, inténtalo de nuevo más tarde."
+
+def log_token_summary(tokens_entrada, tokens_salida, fragmentos_count, modelo):
+    """
+    Registra un resumen claro del conteo de tokens para cada inferencia.
+    
+    Args:
+        tokens_entrada (int): Número de tokens de la entrada (pregunta + contexto)
+        tokens_salida (int): Número de tokens de la respuesta
+        fragmentos_count (int): Número de fragmentos recuperados
+        modelo (str): Nombre del modelo utilizado
+    """
+    separador = "=" * 80
+    logger.info(separador)
+    logger.info("RESUMEN DE CONTEO DE TOKENS (Qdrant)")
+    logger.info(f"Fecha y hora: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"Modelo: {modelo}")
+    logger.info(separador)
+    logger.info(f"FRAGMENTOS RECUPERADOS DE LA BD VECTORIAL QDRANT: {fragmentos_count}")
+    logger.info(f"TOKENS DE ENTRADA (pregunta + contexto): {tokens_entrada}")
+    logger.info(f"TOKENS DE SALIDA (respuesta final): {tokens_salida}")
+    logger.info(f"TOTAL TOKENS CONSUMIDOS: {tokens_entrada + tokens_salida}")
+    
+    # Calcular costo aproximado
+    costo_aprox = 0
+    
+    if modelo.startswith("gpt-4"):
+        costo_entrada = round((tokens_entrada / 1000) * 0.03, 4)
+        costo_salida = round((tokens_salida / 1000) * 0.06, 4)
+        costo_aprox = costo_entrada + costo_salida
+    elif modelo.startswith("gpt-3.5"):
+        costo_aprox = round(((tokens_entrada + tokens_salida) / 1000) * 0.002, 4)
+    
+    logger.info(f"COSTO APROXIMADO USD: ${costo_aprox}")
+    logger.info(separador)
+    
+    # Guardar en formato JSON para análisis posterior (igual que en la versión Chroma)
+    resumen_json = {
+        "timestamp": datetime.datetime.now().isoformat(),
+        "model": modelo,
+        "fragments_count": fragmentos_count,
+        "input_tokens": tokens_entrada,
+        "output_tokens": tokens_salida,
+        "total_tokens": tokens_entrada + tokens_salida,
+        "approx_cost_usd": costo_aprox,
+        "vector_db": "Qdrant"
+    }
+    
+    logger.info(f"RESUMEN_JSON: {json.dumps(resumen_json)}")
+    logger.info(separador)
+    
+    return resumen_json
+
+if __name__ == "__main__":
+    # Ejemplo de uso
+    question = "¿Cómo es la afiliación de la esposa de un afiliado?"
+    answer = process_question(question)
+    print(f"Pregunta: {question}")
+    print(f"Respuesta: {answer}")
 
