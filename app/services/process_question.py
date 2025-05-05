@@ -11,8 +11,9 @@ from qdrant_client import QdrantClient
 from langchain_qdrant import Qdrant
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import PromptTemplate
-from app.core.config import qdrant_url, collection_name_fragmento, model_name, max_results, openai_api_key
+from app.core.config import model_name, max_results
 from app.core.logging_config import get_logger
+from app.core.dependencies import get_embeddings, get_qdrant_client, get_vector_store, get_llm
 
 # Obtener el logger
 logger = get_logger()
@@ -61,33 +62,10 @@ def process_question(question, fecha_desde=None, fecha_hasta=None, k=None):
         if fecha_desde or fecha_hasta:
             logger.info(f"Filtro de fechas: desde {fecha_desde} hasta {fecha_hasta}")
         
-        # Usar la API key cargada desde config.py
-        # Imprimir los primeros caracteres de la API key para debug (no toda por seguridad)
-        api_key_prefix = openai_api_key[:10] if len(openai_api_key) > 10 else openai_api_key
-        logger.info(f"Usando API key que comienza con: {api_key_prefix}...")
-        
-        # Inicializar embeddings con la API key de config
-        embeddings = OpenAIEmbeddings(api_key=openai_api_key)
-        
-        # Inicializar el cliente de Qdrant
-        logger.info(f"Conectando a Qdrant en: {qdrant_url}")
-        qdrant_client = QdrantClient(url=qdrant_url)
-        
-        # Verificar que la colección existe
-        try:
-            qdrant_client.get_collection(collection_name_fragmento)
-            logger.info(f"Colección {collection_name_fragmento} encontrada en Qdrant.")
-        except Exception as e:
-            error_msg = f"Error: La colección {collection_name_fragmento} no existe en Qdrant: {str(e)}"
-            logger.error(error_msg)
-            return "Lo siento, no puedo procesar tu pregunta en este momento debido a un error en la base de datos."
-        
-        # Crear objeto Qdrant para búsqueda vectorial
-        vector_store = Qdrant(
-            client=qdrant_client,
-            collection_name=collection_name_fragmento,
-            embeddings=embeddings
-        )
+        # Obtener recursos desde las dependencias singleton
+        embeddings = get_embeddings()
+        qdrant_client = get_qdrant_client()
+        vector_store = get_vector_store()
         
         # Determinar valor k (número de documentos a recuperar)
         if k is None:
@@ -249,40 +227,35 @@ RESPUESTA:"""
         # Preparar el prompt completo con los documentos relevantes
         prompt = prompt_template.format(context=context, question=question)
         
-        # Log del prompt completo
-        logger.info(f"########### GENERATE ---------#####################")
-        logger.info(f"WEB-PROMPT----> :\n {prompt} \n----------END-WEB-PROMPT <")
-        
-        # Contabilizar tokens del prompt
+        # Contar tokens del prompt completo
         prompt_tokens = contar_tokens(prompt, model_name)
         logger.info(f"Tokens del prompt completo: {prompt_tokens}")
-        session_token_stats["input_tokens"] += prompt_tokens - context_tokens - question_tokens  # Evitar contar doble
+        session_token_stats["input_tokens"] = prompt_tokens  # Actualizar con valor más preciso
         
-        # Inicializar el modelo LLM usando la API key de config
-        logger.info(f"Generando respuesta con modelo {model_name}")
-        llm = ChatOpenAI(model=model_name, temperature=0, api_key=openai_api_key)
+        # Obtener el modelo LLM desde las dependencias
+        llm = get_llm()
         
-        # Generar respuesta
-        llm_response = llm.invoke(prompt)
-        answer = llm_response.content
+        # Generar la respuesta - Log distintivo para esta sección
+        logger.info(f"########### GENERATE (LLM) --------#####################")
+        logger.info(f"Generando respuesta usando modelo {model_name}")
+        
+        response = llm.invoke(prompt)
+        answer = response.content
         
         # Contar tokens de la respuesta
-        response_tokens = contar_tokens(answer, model_name)
-        session_token_stats["output_tokens"] += response_tokens
-        logger.info(f"Tokens de la respuesta: {response_tokens}")
-        
-        # Log de la respuesta completa
-        logger.info(f"WEB-RESPONSE----> :\n {answer} \n----------END-WEB-RESPONSE <")
+        answer_tokens = contar_tokens(answer, model_name)
+        session_token_stats["output_tokens"] = answer_tokens
+        logger.info(f"Tokens de la respuesta: {answer_tokens}")
         
         # Calcular tiempo total de procesamiento
         end_time = datetime.datetime.now()
         processing_time = (end_time - start_time).total_seconds()
-        logger.info(f"Respuesta generada en {processing_time:.2f} segundos")
+        logger.info(f"Tiempo total de procesamiento: {processing_time:.2f} segundos")
         
-        # Resumen de tokens
-        log_token_summary(
-            session_token_stats["input_tokens"], 
-            session_token_stats["output_tokens"], 
+        # Generar resumen de tokens
+        token_summary = log_token_summary(
+            session_token_stats["input_tokens"],
+            session_token_stats["output_tokens"],
             session_token_stats["fragments_count"],
             model_name
         )
@@ -291,11 +264,12 @@ RESPUESTA:"""
         logger.info("="*80)
         
         return answer
-        
+    
     except Exception as e:
-        logger.error(f"Error al procesar la pregunta: {str(e)}", exc_info=True)
+        error_msg = f"Error al procesar la pregunta: {str(e)}"
+        logger.error(error_msg)
         logger.error(traceback.format_exc())
-        return "Ha ocurrido un error al procesar tu pregunta. Por favor, inténtalo de nuevo más tarde."
+        return "Lo siento, ocurrió un error al procesar tu pregunta. Por favor, inténtalo de nuevo más tarde."
 
 def log_token_summary(tokens_entrada, tokens_salida, fragmentos_count, modelo):
     """

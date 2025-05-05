@@ -1,5 +1,5 @@
 # app/api/endpoints.py
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from app.models.schemas import QuestionRequest, AnswerResponse, CompleteAnalysisRequest, CompleteAnalysisResponse
 from app.services.process_question import process_question
 from app.services.token_utils import contar_tokens, count_words, validar_palabras, reducir_contenido_por_palabras
@@ -18,6 +18,7 @@ from langgraph.prebuilt import ToolNode
 from langchain_core.messages import SystemMessage, HumanMessage
 from app.core.config import model_name, collection_name_fragmento, qdrant_url, max_results, openai_api_key
 from app.core.logging_config import log_message, get_logger
+from app.core.dependencies import get_embeddings, get_qdrant_client, get_vector_store_endpoint, get_llm
 
 # Obtener el logger
 logger = get_logger()
@@ -96,7 +97,13 @@ def log_token_summary(tokens_entrada, tokens_salida, modelo):
 
 # Endpoint actualizado para el análisis completo con Qdrant
 @router.post("/complete_analysis", response_model=CompleteAnalysisResponse)
-async def handle_complete_analysis(request: CompleteAnalysisRequest):
+async def handle_complete_analysis(
+    request: CompleteAnalysisRequest,
+    embeddings: OpenAIEmbeddings = Depends(get_embeddings),
+    qdrant_client: QdrantClient = Depends(get_qdrant_client),
+    vector_store: Qdrant = Depends(get_vector_store_endpoint),
+    llm: ChatOpenAI = Depends(get_llm)
+):
     """
     Endpoint que integra todo el proceso de análisis de texto completo
     usando Qdrant como base de datos vectorial
@@ -113,37 +120,6 @@ async def handle_complete_analysis(request: CompleteAnalysisRequest):
     try:
         # Inicializar contador de documentos
         retrieve_stats.document_count = 0
-        
-        # Inicializar embeddings con la API key desde config
-        # Usar la API key cargada desde config.py en lugar de variables de entorno
-        api_key_prefix = openai_api_key[:10] if len(openai_api_key) > 10 else openai_api_key
-        log_message(f"Usando API key que comienza con: {api_key_prefix}...")
-        
-        embeddings = OpenAIEmbeddings(api_key=openai_api_key)
-        
-        # Inicializar el cliente de Qdrant
-        log_message(f"Conectando a Qdrant en: {qdrant_url}")
-        qdrant_client = QdrantClient(url=qdrant_url)
-        
-        # Verificar que la colección existe
-        try:
-            qdrant_client.get_collection(collection_name_fragmento)
-            log_message(f"Colección {collection_name_fragmento} encontrada en Qdrant.")
-        except Exception as e:
-            error_msg = f"Error: La colección {collection_name_fragmento} no existe en Qdrant: {str(e)}"
-            log_message(error_msg, level='ERROR')
-            raise HTTPException(status_code=500, detail=error_msg)
-        
-        # Crear objeto Qdrant para búsqueda vectorial
-        vector_store = Qdrant(
-            client=qdrant_client,
-            collection_name=collection_name_fragmento,
-            embeddings=embeddings
-        )
-        
-        # Inicializar el modelo LLM con la API key desde config
-        log_message(f"Inicializando modelo LLM: {model_name}")
-        llm = ChatOpenAI(model=model_name, temperature=0, api_key=openai_api_key)
         
         # Función de retrieve adaptada para Qdrant
         def retrieve(query: str):

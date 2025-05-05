@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Asistente SIMAP - Cliente</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+        }
+        label {
+            display: block;
+            margin-top: 15px;
+            font-weight: bold;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 8px;
+            margin-top: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        textarea {
+            height: 100px;
+            resize: vertical;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            margin-top: 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        .response {
+            margin-top: 30px;
+            background-color: #f9f9f9;
+            padding: 15px;
+            border-radius: 4px;
+            border-left: 4px solid #3498db;
+            white-space: pre-wrap;
+        }
+        .metadata {
+            margin-top: 15px;
+            font-size: 0.9em;
+            color: #7f8c8d;
+        }
+        .spinner {
+            display: none;
+            margin-top: 20px;
+            text-align: center;
+        }
+        .spinner::after {
+            content: "";
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(0,0,0,0.1);
+            border-radius: 50%;
+            border-top-color: #3498db;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .error {
+            color: #e74c3c;
+            font-weight: bold;
+            margin-top: 15px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Asistente SIMAP</h1>
+    <div class="container">
+        <form id="questionForm">
+            <label for="question">Pregunta:</label>
+            <textarea id="question" required placeholder="Ingrese su pregunta..."></textarea>
+            
+            <label for="fechaDesde">Fecha Desde:</label>
+            <input type="date" id="fechaDesde" value="2024-01-01">
+            
+            <label for="fechaHasta">Fecha Hasta:</label>
+            <input type="date" id="fechaHasta" value="2024-12-31">
+            
+            <label for="k">Cantidad de documentos (k):</label>
+            <input type="number" id="k" min="1" max="10" value="4">
+            
+            <button type="submit">Enviar Consulta</button>
+        </form>
+        
+        <div id="spinner" class="spinner"></div>
+        <div id="error" class="error"></div>
+        
+        <div id="responseContainer" style="display: none;">
+            <div class="metadata" id="metadata"></div>
+            <h3>Respuesta:</h3>
+            <div class="response" id="response"></div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('questionForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            // Obtener valores del formulario
+            const question = document.getElementById('question').value;
+            const fechaDesde = document.getElementById('fechaDesde').value;
+            const fechaHasta = document.getElementById('fechaHasta').value;
+            const k = parseInt(document.getElementById('k').value);
+            
+            // Mostrar spinner y ocultar respuesta anterior
+            document.getElementById('spinner').style.display = 'block';
+            document.getElementById('responseContainer').style.display = 'none';
+            document.getElementById('error').textContent = '';
+            
+            try {
+                // Realizar la solicitud al servidor
+                const response = await fetch('http://localhost:8000/api/complete_analysis', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        question_input: question,
+                        fecha_desde: fechaDesde,
+                        fecha_hasta: fechaHasta,
+                        k: k
+                    })
+                });
+                
+                // Verificar si la respuesta es exitosa
+                if (!response.ok) {
+                    throw new Error(`Error en la solicitud: ${response.status} ${response.statusText}`);
+                }
+                
+                // Procesar la respuesta
+                const data = await response.json();
+                
+                // Actualizar la interfaz con la respuesta
+                document.getElementById('response').textContent = data.answer;
+                
+                // Mostrar metadata
+                const metadata = data.metadata;
+                document.getElementById('metadata').innerHTML = `
+                    <strong>Modelo:</strong> ${metadata.model || 'No disponible'}<br>
+                    <strong>Documentos recuperados:</strong> ${metadata.document_count || 0}<br>
+                    <strong>Periodo consultado:</strong> ${metadata.fecha_desde} a ${metadata.fecha_hasta}
+                `;
+                
+                // Mostrar el contenedor de respuesta
+                document.getElementById('responseContainer').style.display = 'block';
+            } catch (error) {
+                // Mostrar mensaje de error
+                document.getElementById('error').textContent = error.message;
+            } finally {
+                // Ocultar spinner
+                document.getElementById('spinner').style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html> 
