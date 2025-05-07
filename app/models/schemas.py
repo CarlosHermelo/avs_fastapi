@@ -23,9 +23,9 @@ class CompleteAnalysisRequest(BaseModel):
     Modelo para las solicitudes de análisis completo
     """
     question_input: str
-    fecha_desde: str = "2023-01-01"
-    fecha_hasta: str = "2024-12-31"
-    k: Optional[int] = 5
+    fecha_desde: Optional[str] = None
+    fecha_hasta: Optional[str] = None
+    k: Optional[int] = None
 
 class AnalysisMetadata(BaseModel):
     document_count: int

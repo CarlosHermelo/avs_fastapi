@@ -88,6 +88,12 @@
             font-weight: bold;
             margin-top: 15px;
         }
+        .info-text {
+            font-style: italic;
+            color: #7f8c8d;
+            margin-top: 10px;
+            font-size: 0.9em;
+        }
     </style>
 </head>
 <body>
@@ -97,14 +103,7 @@
             <label for="question">Pregunta:</label>
             <textarea id="question" required placeholder="Ingrese su pregunta..."></textarea>
             
-            <label for="fechaDesde">Fecha Desde:</label>
-            <input type="date" id="fechaDesde" value="2024-01-01">
-            
-            <label for="fechaHasta">Fecha Hasta:</label>
-            <input type="date" id="fechaHasta" value="2024-12-31">
-            
-            <label for="k">Cantidad de documentos (k):</label>
-            <input type="number" id="k" min="1" max="10" value="4">
+            <p class="info-text">Nota: La cantidad de documentos y el rango de fechas se configuran en el servidor.</p>
             
             <button type="submit">Enviar Consulta</button>
         </form>
@@ -125,9 +124,6 @@
             
             // Obtener valores del formulario
             const question = document.getElementById('question').value;
-            const fechaDesde = document.getElementById('fechaDesde').value;
-            const fechaHasta = document.getElementById('fechaHasta').value;
-            const k = parseInt(document.getElementById('k').value);
             
             // Mostrar spinner y ocultar respuesta anterior
             document.getElementById('spinner').style.display = 'block';
@@ -142,10 +138,7 @@
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        question_input: question,
-                        fecha_desde: fechaDesde,
-                        fecha_hasta: fechaHasta,
-                        k: k
+                        question_input: question
                     })
                 });
                 

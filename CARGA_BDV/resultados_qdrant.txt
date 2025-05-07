@@ -1,0 +1,89 @@
+
+==================================================
+CONSULTA QDRANT - 2025-05-06 20:00:05
+Pregunta: tramite baston
+Resultados encontrados: 4
+==================================================
+
+
+----- Fragmento #1 (Score: 0.7713) -----
+Contenido:
+COPETE: 
+CONSISTE: Los jubilados, pensionados nacionales y veteranos de guerra que utilicen la Tarjeta SUBE en colectivos y trenes acceden a una tarifa diferencial. Los siguientes grupos obtienen, además, Tarifas Diferenciales: Jubilados y Pensionados Personal del Trabajo Doméstico Ex Combatientes de Malvinas Beneficiarios de Asignación Universal por Hijo Beneficiarios de Asignación por embarazo Beneficiarios de Programa de Jefes de Hogar
+REQUISITOS: Encontrarse dentro de los grupos que acceden al presente beneficio. Credencial de afiliación. Documento Nacional de Identidad. Tarjeta SUBE
+PAUTAS: 1-Explicar EN QUE CONSISTE el beneficio e informar: -¿Cuenta con la credencial de afiliación a Pami? Si la respuesta es negativa indicar: -Deberá solicitarla en la Agencia/UGL correspondiente. 2-Si necesitara gestionar la credencia de afiliación, informar sobre la posibilidad de obtener un TURNO WEB a través de la pagina del Instituto o gestionarlo en caso de corresponder. 3-Informar REQUISITOS. 4-Emplear pauta general de cierre.
+QUIEN_PUEDE: COMO: El acceso a dicho beneficio es automático. Si por algún motivo el transporte no estuviera cobrando la tarifa establecida, el jubilado, pensionado o veterano de guerra deberá realizar la validación de la Tarjeta SUBE. Para ello deberá presentarse en alguno de los CENTROS DE ATENCIóN AL USUARIO. QUIEN: El interesado.
+QUIENES_PUEDEN: El interesado.
+COMO_LO_HACEN: Para acceder a la tarifa social del transporte,debe crear un PIN SUBE en el apartado "Programas y beneficios" de Mi ANSES, para registrar tu tarjeta desde la web. O acercate a un Centro de Atención con tu tarjeta SUBE y tu DNI para registrarla.
+
+Metadatos:
+  - servicio: INFORMACION GENERAL
+  - tipo: Subsidios en Servicios Públicos
+  - subtipo: Subsidios Colectivos y Trenes
+  - id_sub: 383
+  - fecha_carga: 2025-05-02T00:52:39.862036
+  - _id: 778b8dbf-3378-4084-8d61-75769e636b9b
+  - _collection_name: fragment_store
+----------------------------------------------------------------------
+
+----- Fragmento #2 (Score: 0.7705) -----
+Contenido:
+COPETE: PAMI provee a las personas afiliadas los siguientes elementos: Bastón canadiense. Par de bastones canadienses Bastón en "T". Bastón blanco (para no videntes). Bastón verde (para visión reducida). Bastón trípode de metal
+CONSISTE: Los tiempos de entrega de los elementos dependen del tiempo en que demora en salir la licitación de los mismos y de la cantidad que entrega el proveedor. Desde el 20 de Marzo 2023 los pedidos de elementos se hacen por Orden de Prestación que se carga en la Agencia.y deja de lado el sistema de Fisiatría) Primero se chequeará el stock de la UGL antes de pasarlo a Pendiente de Aceptación por proveedor. "Si dentro del año de entregado el elemento, éste sufre alguna rotura, lo cubre la garantía. En ese caso, la persona afiliada deberá acercase a la Agencia/UGL que le corresponde, la cual informará a fisiatriaugl@pami.org.ar el detalle del caso, y ésta hará las gestiones correspondientes con el proveedor a fin de que reemplace el elemento. Pasado el año, si el elemento sufre desgaste o roturas, deberá gestionar un nuevo pedido con los mismos requisitos que cuando se pide por primera vez". Una vez autorizado el elemento, la persona afiliada será contactada desde el Banco de Prótesis para retirarlo. La UGL no realiza la entrega del elemento en el domicilio. El retiro del elemento lo puede efectuar cualquier persona con la documentación de la persona afiliado y la solicitud correspondiente.
+REQUISITOS: Orden Medica Electrónica De no contar con la OME, deberá presentar: Documento Nacional de Identidad. Orden manual de médico/a de cabecera o especialista Resumen de historia clí­nica, incluyendo peso y talla de las persona afiliada.
+PAUTAS: 1- Explicar EN QUé CONSISTE la prestación. 2- Indagar sobre el estado de situación habilitante: - ¿El elemento que solicitará es a medida o tamaño estándar? - Según respuesta, confirmar: - ¿Cuenta con la orden de su médico de cabecera /especialista? 3- Informar REQUISITOS 4- Indicar días y horarios de atención de la Agencia/UGL correspondiente. 5- Informar sobre la posibilidad de obtener un TURNO WEB a través de la página web del Instituto o gestionarlo en caso de corresponder, para que luego pueda ser atendido en su Agencia/UGL. 6- Emplear la pauta general de cierre.
+QUIEN_PUEDE: CóMO ESTE TRÁMITE ES ONLINE. Para realizarlo ingresá a la sección Trámites Online haciendo clic ACÁ . Este trámite también podrás realizarlo de manera presencial sacando previamente un Turno Online haciendo click ACÁ Ante cualquier duda comunícate al 138. QUIéN El trámite lo pueden realizar el afiliado, un familiar o apoderado.
+QUIENES_PUEDEN: El trámite podrá realizarlo la persona afiliada, su apoderado/a , familiar o lo puede inicar el médico si está habilitado en el sistema de Orden Médica Electrónica.
+COMO_LO_HACEN: Este es un trámite web. Podés realizarlo desde tu celular, tablet o computadora. Si querés aprender a realizar tus trámites web mirá este video. También podés realizar este trámite en tu agencia. Recordá sacar turno online para una mejor atención. El médico puede emitir una Orden Médica Electrónica,si está habilitado, y la persona afiliada no debería hacer ninguna gestión.
+
+Metadatos:
+  - servicio: SERVICIOS MÉDICOS
+  - tipo: Fisiatría- Elementos de Ayuda Externa
+  - subtipo: Bastones
+  - id_sub: 314
+  - fecha_carga: 2025-05-02T00:52:39.881174
+  - _id: cbab2f24-ecd4-44a4-82bd-112681939537
+  - _collection_name: fragment_store
+----------------------------------------------------------------------
+
+----- Fragmento #3 (Score: 0.7705) -----
+Contenido:
+COPETE: 
+CONSISTE: A través del Decreto 38/2004, del Poder Ejecutivo Nacional, las personas discapacitadas gozan del beneficio de viajar gratis en los medio de transporte público terrestres sometidos a control de autoridad nacional. Esto es válido para viajes de corta, media y larga distancia, independientemente de la causal del viaje. Tipo de transporte que abarca: Trenes, Subtes, Colectivos, ómnibus.
+REQUISITOS: Documento Nacional de Identidad (DNI o LE o LF o LC o CI). También puede ser fotocopia autenticada por autoridad competente. Certificado Único de Discapacidad También puede ser fotocopia autenticada por autoridad competente. Certificado de discapacidad en el que figure la necesidad de viajar acompañado para cubrir pasaje de acompañante.
+PAUTAS: 1-Explicar EN QUE CONSISTE la franquicia e informar: -¿Cuenta con un certificado de discapacidad vigente? Si la respuesta es negativa informe como tramitarlo o actualizarlo. 2-Informar REQUISITOS. 3-Emplear pauta general de cierre.
+QUIEN_PUEDE: COMO: Presentando copia autenticada del certificado de discapacidad en el medio de transporte o en boletería en caso de corresponder. Para el transporte de larga distancia, la persona con discapacidad o su representante legal deberá solicitar ante la boletería de la prestataria su pasaje y el de un acompañante en caso de necesidad documentada (en el certificado de discapacidad debe figurar la necesidad de viajar acompañado), indicando la fecha de salida y de regreso, el horario del viaje, lugar de origen y de destino y el motivo del viaje. La solicitud debe efectuarse con 48 horas de anticipación. QUIEN: Debe presentarse el titular del beneficio o su representante legal.
+QUIENES_PUEDEN: Debe presentarse el titular del beneficio o su representante legal.
+COMO_LO_HACEN: Presentando copia autenticada del certificado de discapacidad en el medio de transporte o en boletería en caso de corresponder. Para el transporte de larga distancia, la persona con discapacidad o su representante legal deberá solicitar ante la boletería de la prestataria su pasaje y el de un acompañante en caso de necesidad documentada (en el certificado de discapacidad debe figurar la necesidad de viajar acompañado), indicando la fecha de salida y de regreso, el horario del viaje, lugar de origen y de destino y el motivo del viaje. La solicitud debe efectuarse con 48 horas de anticipación.
+
+Metadatos:
+  - servicio: INFORMACION GENERAL
+  - tipo: Discapacitados
+  - subtipo: Discapacidad Viajes gratuitos
+  - id_sub: 391
+  - fecha_carga: 2025-05-02T00:52:39.861005
+  - _id: 1c9c0d26-cfc8-4a5e-8389-823622a70655
+  - _collection_name: fragment_store
+----------------------------------------------------------------------
+
+----- Fragmento #4 (Score: 0.7700) -----
+Contenido:
+COPETE: 
+CONSISTE: Sistema capitado La Braquiterapia Intracavitaria es un tratamiento radioterápico que consiste en la colocación de fuentes radiactivas encapsuladas dentro o en la proximidad de un tumor (distancia "corta" entre el volumen a tratar y la fuente radiactiva). Se usa principalmente en tumores ginecológicos. Se puede combinar con radioterapia externa. Se debe aislar al paciente radioactivo mientras la fuente esté en su lugar. GUíA DE PROCEDIMIENTO DE CASOS
+REQUISITOS: Documento Nacional de Identidad. Credencial de afiliación. Prescripción del médico/a especialista.
+PAUTAS: 1-Explicar EN QUE CONSISTE la prestación e indagar sobre el estado de situación habilitante: -¿Cuenta con la orden del médico especialista? Tenga en cuenta que el mismo es el responsable de la solicitud de dicho tratamiento. -¿Conoce cual es el prestador que tiene asignado? Si la respuesta es negativa VER CARTILLA e informar. 2-Informar REQUISITOS. 3-Emplear la pauta general de cierre.
+QUIEN_PUEDE: COMO El turno puede ser solicitado personalmente o por teléfono directamente en el prestador que le corresponda al afiliado por cartilla. QUIEN El afiliado o cualquier otra persona en su nombre.
+QUIENES_PUEDEN: La persona afiliada o cualquier otra persona en su nombre.
+COMO_LO_HACEN: El turno puede ser solicitado personalmente o por teléfono directamente en el prestador que le corresponda a la persona afiliada por cartilla.
+
+Metadatos:
+  - servicio: ONCOLOGÍA - PLAN INTEGRAL
+  - tipo: Oncología - Prestaciones
+  - subtipo: Terapia Radiante -Braquiterapia Intracavitaria
+  - id_sub: 438
+  - fecha_carga: 2025-05-02T00:52:39.870058
+  - _id: f133a003-b03e-4471-85aa-83e8f20fb2ae
+  - _collection_name: fragment_store
+----------------------------------------------------------------------
+
+

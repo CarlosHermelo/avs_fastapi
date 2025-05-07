@@ -134,9 +134,9 @@ async def handle_complete_analysis(
             tokens_consulta = contar_tokens(query, model_name)
             log_message(f"Tokens de entrada en retrieve (consulta): {tokens_consulta}")
             
-            # Usar valor k del request o el valor por defecto
-            k_value = request.k if request.k else max_results
-            log_message(f"Buscando documentos relevantes con k={k_value}")
+            # Usar valor del config.ini, ignorando el del request
+            k_value = max_results
+            log_message(f"Buscando documentos relevantes con k={k_value} (valor del config.ini)")
             
             # Realizar búsqueda en Qdrant
             try:
@@ -384,10 +384,9 @@ Estructura breve: Usa puntos clave, numeración o listas de una sola línea si e
         # Procesar la pregunta
         log_message(f"##############-------PROCESANDO COMPLETE_ANALYSIS (Qdrant)----------#####################")
         
-        # Preparar el mensaje con la pregunta y contexto
+        # Preparar el mensaje con la pregunta y contexto - Usar valores del config.ini
         question_with_context = f"""
 Pregunta: {request.question_input}
-Periodo: desde {request.fecha_desde} hasta {request.fecha_hasta}
 """
         
         # Registramos tokens de la pregunta inicial
@@ -479,8 +478,8 @@ Periodo: desde {request.fecha_desde} hasta {request.fecha_hasta}
                     "document_count": retrieve_stats.document_count,
                     "model": model_name,
                     "question": request.question_input,
-                    "fecha_desde": request.fecha_desde,
-                    "fecha_hasta": request.fecha_hasta,
+                    "fecha_desde": "Configurada en config.ini",
+                    "fecha_hasta": "Configurada en config.ini",
                     "vector_db": "Qdrant",
                     "processing_time_seconds": processing_time,
                     "tokens_in": tokens_totales_entrada,
