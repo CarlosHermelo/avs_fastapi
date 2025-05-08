@@ -11,6 +11,11 @@ services:
       - ./config.ini:/app/config.ini
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ENVIRONMENT=production
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - QDRANT_URL=${QDRANT_URL:-http://localhost:6333}
+      - COLLECTION_NAME=${COLLECTION_NAME:-fragment_store}
+      - MAX_RESULTS=${MAX_RESULTS:-5}
     restart: unless-stopped
     
   # Si deseas agregar una base de datos u otros servicios, puedes incluirlos aquí

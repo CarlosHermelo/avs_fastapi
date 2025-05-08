@@ -11,9 +11,12 @@ __pycache__/
 env/
 venv/
 ENV/
+*.env
 
-
+# Archivos de configuración con secretos
 config.ini
+*.ini
+secrets/
 
 # Archivos de log
 *.log

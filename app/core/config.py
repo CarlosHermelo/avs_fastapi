@@ -4,6 +4,20 @@ import configparser
 from pathlib import Path
 import re
 
+# Intentar cargar variables de entorno desde .env si existe, con override para asegurar que se recarguen siempre
+try:
+    from dotenv import load_dotenv, find_dotenv
+    dotenv_path = find_dotenv()
+    if dotenv_path:
+        print(f"Cargando variables de entorno desde: {dotenv_path}")
+        load_dotenv(dotenv_path, override=True)  # Cargar forzando override de variables existentes
+    else:
+        print("Archivo .env no encontrado")
+except ImportError:
+    # dotenv no está instalado, continuamos sin él
+    print("python-dotenv no está instalado, no se cargarán variables desde .env")
+    pass
+
 # Buscar el archivo config.ini
 def find_config_file():
     """
@@ -28,36 +42,59 @@ def find_config_file():
     
     raise FileNotFoundError("No se pudo encontrar el archivo config.ini")
 
-# Cargar la configuración
+# Cargar la configuración desde archivo si existe
 config = configparser.ConfigParser()
-config_path = find_config_file()
+try:
+    config_path = find_config_file()
+    print(f"Cargando configuración desde: {config_path}")
+    
+    # Leer el archivo de configuración manualmente para manejar API keys multilínea
+    with open(config_path, 'r') as f:
+        content = f.read()
+    
+    # Eliminar saltos de línea en la API key
+    fixed_content = re.sub(r'(openai_api_key\s*=\s*[^\n]+)\n([^\[=]+)', r'\1\2', content)
+    
+    # Cargar la configuración
+    config.read_string(fixed_content)
+except FileNotFoundError:
+    # No se encontró config.ini, usaremos solo variables de entorno
+    print("Archivo config.ini no encontrado, usando solo variables de entorno")
+    pass
 
-# Leer el archivo de configuración manualmente para manejar API keys multilínea
-with open(config_path, 'r') as f:
-    content = f.read()
+# Configuración general - Accediendo correctamente a las secciones
+model_name = os.environ.get('OPENAI_MODEL', '')
+if not model_name and 'DEFAULT' in config:
+    model_name = config['DEFAULT'].get('modelo', 'gpt-3.5-turbo')
 
-# Eliminar saltos de línea en la API key
-fixed_content = re.sub(r'(openai_api_key\s*=\s*[^\n]+)\n([^\[=]+)', r'\1\2', content)
+# Priorizar la variable de entorno para la API key
+openai_api_key = os.environ.get('OPENAI_API_KEY', '')
 
-# Crear un archivo temporal con el contenido corregido
-from io import StringIO
-config.read_string(fixed_content)
+# Mostrar la API key que se está usando (solo primeros y últimos caracteres)
+if openai_api_key:
+    key_preview = f"{openai_api_key[:5]}...{openai_api_key[-4:]}" if len(openai_api_key) > 9 else openai_api_key
+    print(f"Usando OPENAI_API_KEY desde variables de entorno: {key_preview}")
+elif 'DEFAULT' in config:
+    openai_api_key = config['DEFAULT'].get('openai_api_key', '').strip()
+    key_preview = f"{openai_api_key[:5]}...{openai_api_key[-4:]}" if len(openai_api_key) > 9 else openai_api_key
+    print(f"Usando OPENAI_API_KEY desde config.ini: {key_preview}")
 
-# Configuración general
-DEFAULT_SECTION = config['DEFAULT']
-model_name = DEFAULT_SECTION.get('modelo', 'gpt-3.5-turbo')
-openai_api_key = DEFAULT_SECTION.get('openai_api_key', os.environ.get('OPENAI_API_KEY', '')).strip()
-
-# Imprimir los primeros 10 caracteres de la API key para debugging (no toda la key por seguridad)
-api_key_prefix = openai_api_key[:10] if len(openai_api_key) > 10 else openai_api_key
-print(f"API Key cargada (primeros caracteres): {api_key_prefix}...")
+# Solo mostrar información sensible en entorno de desarrollo
+if openai_api_key and os.environ.get('ENVIRONMENT', '').lower() != 'production':
+    api_key_prefix = openai_api_key[:5] if len(openai_api_key) > 5 else openai_api_key
+    print(f"API Key cargada (primeros caracteres): {api_key_prefix}...")
 
 # Configuración de Qdrant
-QDRANT_SECTION = config['SERVICIOS_SIMAP_Q']
-qdrant_url = QDRANT_SECTION.get('qdrant_url', 'http://localhost:6333')
-collection_name_fragmento = QDRANT_SECTION.get('collection_name_fragmento', 'fragment_store')
-nombre_bdvectorial = QDRANT_SECTION.get('nombre_bdvectorial', 'fragment_store')
-max_results = int(QDRANT_SECTION.get('max_results', 5))
+if 'SERVICIOS_SIMAP_Q' in config:
+    qdrant_url = os.environ.get('QDRANT_URL', config['SERVICIOS_SIMAP_Q'].get('qdrant_url', 'http://localhost:6333'))
+    collection_name_fragmento = os.environ.get('COLLECTION_NAME', config['SERVICIOS_SIMAP_Q'].get('collection_name_fragmento', 'fragment_store'))
+    nombre_bdvectorial = os.environ.get('NOMBRE_BDV', config['SERVICIOS_SIMAP_Q'].get('nombre_bdvectorial', 'fragment_store'))
+    max_results = int(os.environ.get('MAX_RESULTS', config['SERVICIOS_SIMAP_Q'].get('max_results', 5)))
+else:
+    qdrant_url = os.environ.get('QDRANT_URL', 'http://localhost:6333')
+    collection_name_fragmento = os.environ.get('COLLECTION_NAME', 'fragment_store')
+    nombre_bdvectorial = os.environ.get('NOMBRE_BDV', 'fragment_store')
+    max_results = int(os.environ.get('MAX_RESULTS', 5))
 
 # Para mantener compatibilidad con código que espera fragment_store_directory
 fragment_store_directory = None  # Ya no se usa con Qdrant, pero lo mantenemos para compatibilidad

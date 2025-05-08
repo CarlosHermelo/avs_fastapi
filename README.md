@@ -271,4 +271,35 @@ Para un diagnóstico más detallado, verifica los logs en:
 
 ## Licencia
 
-Este proyecto está licenciado bajo [incluir licencia aquí]. 
+Este proyecto está licenciado bajo [incluir licencia aquí].
+
+# Gestión de Configuración y Secretos
+
+## Variables de Entorno (Recomendado para Producción)
+
+Para mejorar la seguridad, la aplicación ahora soporta la carga de configuración sensible a través de variables de entorno:
+
+1. Crea un archivo `.env` en la raíz del proyecto (sólo para desarrollo, no incluirlo en Git):
+   ```
+   OPENAI_API_KEY=tu-api-key-aquí
+   ENVIRONMENT=development
+   ```
+
+2. En producción, configura las variables de entorno usando los mecanismos de tu plataforma:
+   - **Docker**: Usa `docker run -e OPENAI_API_KEY=valor ...` o `docker-compose.yml`
+   - **Kubernetes**: Usa ConfigMaps/Secrets
+   - **Servicios cloud**: Usa la configuración de variables de entorno del servicio
+
+Las siguientes variables son compatibles:
+- `OPENAI_API_KEY`: Tu clave API de OpenAI (obligatoria)
+- `ENVIRONMENT`: Entorno de ejecución (development/production)
+- `OPENAI_MODEL`: Modelo a utilizar (opcional)
+- `QDRANT_URL`: URL del servidor Qdrant (opcional)
+- `COLLECTION_NAME`: Nombre de la colección (opcional)
+- `MAX_RESULTS`: Número máximo de resultados (opcional)
+
+> **IMPORTANTE**: Las variables de entorno tienen prioridad sobre los valores en `config.ini`. En producción, se recomienda usar exclusivamente variables de entorno para la información sensible.
+
+## Archivo de Configuración
+
+El archivo `config.ini` sigue siendo compatible, pero no debe usarse para almacenar secretos en producción. Úsalo solo para configuraciones no sensibles. 

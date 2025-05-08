@@ -1,13 +1,28 @@
 # app/services/graph_logic.py
 from qdrant_client import QdrantClient
+from qdrant_client.http.exceptions import UnexpectedResponse
 from langchain_qdrant import Qdrant
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langgraph.graph import MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from app.services.token_utils import contar_tokens, validar_palabras, reducir_contenido_por_palabras
-from app.core.logging_config import log_message
+from app.core.logging_config import log_message, get_logger
 from app.core.config import qdrant_url, collection_name_fragmento, model_name
+import traceback
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, retry_if_not_exception_type, before_sleep_log
+from openai import RateLimitError, APITimeoutError, APIConnectionError, APIError
+
+# Obtenemos el logger configurado
+logger = get_logger()
+
+# Clase para mantener estadísticas
+class RetrieveStats:
+    def __init__(self):
+        self.document_count = 0
+
+# Instancia global
+retrieve_stats = RetrieveStats()
 
 def build_graph(question, fecha_desde=None, fecha_hasta=None, k=None, api_key=None):
     """
@@ -23,13 +38,6 @@ def build_graph(question, fecha_desde=None, fecha_hasta=None, k=None, api_key=No
     Returns:
         tuple: (graph, human_message)
     """
-    # Clase para mantener estadísticas
-    class RetrieveStats:
-        def __init__(self):
-            self.document_count = 0
-    
-    retrieve_stats = RetrieveStats()
-    
     # Inicializar embeddings
     embeddings = OpenAIEmbeddings(api_key=api_key)
     
@@ -46,6 +54,17 @@ def build_graph(question, fecha_desde=None, fecha_hasta=None, k=None, api_key=No
     # Inicializar el modelo LLM
     llm = ChatOpenAI(model=model_name, temperature=0, api_key=api_key)
     
+    # Función para realizar búsqueda en Qdrant con reintentos
+    @retry(
+        retry=retry_if_exception_type((UnexpectedResponse, ConnectionError, TimeoutError)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=20),
+        before_sleep=before_sleep_log(logger, logger.level)
+    )
+    def _similarity_search_with_retry(query, k_value):
+        """Ejecuta similarity_search_with_score con reintentos automáticos en caso de errores de conexión"""
+        return vector_store.similarity_search_with_score(query, k=k_value)
+    
     # Función de retrieve
     def retrieve(query: str):
         """Recuperar información relacionada con la consulta usando Qdrant."""
@@ -60,7 +79,8 @@ def build_graph(question, fecha_desde=None, fecha_hasta=None, k=None, api_key=No
         
         # Realizar búsqueda en Qdrant
         try:
-            retrieved_docs = vector_store.similarity_search_with_score(query, k=k_value)
+            # Usamos la función con reintentos
+            retrieved_docs = _similarity_search_with_retry(query, k_value)
             documentos_relevantes = [doc for doc, score in retrieved_docs]
             cantidad_fragmentos = len(documentos_relevantes)
             
@@ -83,9 +103,21 @@ def build_graph(question, fecha_desde=None, fecha_hasta=None, k=None, api_key=No
             
             return serialized
         except Exception as e:
-            error_msg = f"Error al realizar la búsqueda en Qdrant: {str(e)}"
+            error_msg = f"Error al realizar la búsqueda en Qdrant después de múltiples intentos: {str(e)}"
             log_message(error_msg, level='ERROR')
-            return "Error al buscar en la base de datos: no se pudo recuperar información relevante."
+            log_message(traceback.format_exc(), level='ERROR')
+            return "Error al buscar en la base de datos: no se pudo recuperar información relevante. Por favor, inténtalo de nuevo más tarde."
+    
+    # Función para invocar LLM con reintentos
+    @retry(
+        retry=retry_if_exception_type((RateLimitError, APITimeoutError, APIConnectionError, APIError)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=30),
+        before_sleep=before_sleep_log(logger, logger.level)
+    )
+    def _invoke_llm_with_retry(llm_instance, messages):
+        """Invoca LLM con reintentos en caso de error de API"""
+        return llm_instance.invoke(messages)
     
     # Nodo 1: Generar consulta o responder directamente
     def query_or_respond(state: MessagesState):
@@ -98,13 +130,25 @@ def build_graph(question, fecha_desde=None, fecha_hasta=None, k=None, api_key=No
         log_message(f"Tokens de entrada en query_or_respond: {tokens_entrada_qor}")
         
         llm_with_tools = llm.bind_tools([retrieve])
-        response = llm_with_tools.invoke(state["messages"])
         
-        # Contar tokens de salida
-        tokens_salida_qor = contar_tokens(response.content, model_name)
-        log_message(f"Tokens de salida en query_or_respond: {tokens_salida_qor}")
-        
-        return {"messages": [response]}
+        try:
+            # Usar la función con reintentos
+            response = _invoke_llm_with_retry(llm_with_tools, state["messages"])
+            
+            # Contar tokens de salida
+            tokens_salida_qor = contar_tokens(response.content, model_name)
+            log_message(f"Tokens de salida en query_or_respond: {tokens_salida_qor}")
+            log_message(f"Total tokens en query_or_respond: {tokens_entrada_qor + tokens_salida_qor}")
+            
+            return {"messages": [response]}
+        except Exception as e:
+            error_msg = f"Error al invocar LLM en query_or_respond después de múltiples intentos: {str(e)}"
+            log_message(error_msg, level='ERROR')
+            log_message(traceback.format_exc(), level='ERROR')
+            
+            # Crear un mensaje de error para devolver al usuario
+            error_response = AIMessage(content="Lo siento, estoy experimentando problemas técnicos en este momento. Por favor, intenta de nuevo más tarde.")
+            return {"messages": [error_response]}
     
     # Nodo 2: Ejecutar la herramienta de recuperación
     tools = ToolNode([retrieve])
@@ -163,15 +207,24 @@ quienes se encargan de atender las consultas de los afiliados.
         tokens_entrada = contar_tokens(prompt_text, model_name)
         log_message(f"Tokens de entrada (prompt): {tokens_entrada}")
         
-        # Realizar la inferencia
-        response = llm.invoke(prompt)
-        
-        # Contar tokens de la respuesta
-        tokens_salida = contar_tokens(response.content, model_name)
-        log_message(f"Tokens de salida (respuesta): {tokens_salida}")
-        log_message(f"Total tokens consumidos: {tokens_entrada + tokens_salida}")
-        
-        return {"messages": [response]}
+        try:
+            # Realizar la inferencia con reintentos
+            response = _invoke_llm_with_retry(llm, prompt)
+            
+            # Contar tokens de la respuesta
+            tokens_salida = contar_tokens(response.content, model_name)
+            log_message(f"Tokens de salida (respuesta): {tokens_salida}")
+            log_message(f"Total tokens consumidos: {tokens_entrada + tokens_salida}")
+            
+            return {"messages": [response]}
+        except Exception as e:
+            error_msg = f"Error al invocar LLM en generate después de múltiples intentos: {str(e)}"
+            log_message(error_msg, level='ERROR')
+            log_message(traceback.format_exc(), level='ERROR')
+            
+            # Crear un mensaje de error para devolver al usuario
+            error_response = AIMessage(content="Lo siento, estoy experimentando problemas técnicos en este momento. Por favor, intenta de nuevo más tarde.")
+            return {"messages": [error_response]}
     
     # Construcción del gráfico de conversación
     graph_builder = StateGraph(MessagesState)
