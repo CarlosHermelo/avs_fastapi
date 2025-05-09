@@ -1,0 +1,60 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Reglas de Parámetros API - Asistente SIMAP
+
+## Parámetros Obligatorios
+
+- **question_input**: Texto de la pregunta del usuario
+  - Siempre requerido en todas las consultas
+  - No puede estar vacío
+  - Debe ser almacenado en los logs para seguimiento
+
+- **id_usuario**: Identificador numérico del agente que realiza la consulta
+  - Valor actual fijo: 321
+  - Debe ser enviado en todas las consultas
+  - Debe ser registrado en los logs
+  - Debe incluirse en los metadatos de respuesta
+  - Será utilizado para asociar la consulta con el usuario en la base de datos relacional
+
+- **ugel_origen**: Unidad de Gestión Local del agente
+  - Valor actual fijo: "Formosa"
+  - Debe ser enviado en todas las consultas
+  - Debe ser registrado en los logs
+  - Debe incluirse en los metadatos de respuesta
+  - Será utilizado para análisis por región en la base de datos relacional
+
+## Gestión de Parámetros
+
+1. **Frontend**
+   - Los valores de id_usuario y ugel_origen deben mostrarse visualmente al usuario
+   - Deben incluirse automáticamente en cada solicitud al backend
+   - No deben ser modificables por el usuario final (valores fijos)
+   - Deben mostrarse en los metadatos de la respuesta recibida
+
+2. **Backend**
+   - Debe validar la presencia de estos parámetros
+   - Debe registrar estos valores en los logs con cada consulta
+   - Debe incluir estos valores en los metadatos de la respuesta
+   - Debe estar preparado para almacenar estos datos en la base de datos relacional
+
+3. **Persistencia**
+   - La estructura de la tabla consultas incluye campos para id_usuario y ugel_origen
+   - Cada consulta realizada debe registrarse con estos valores
+   - Las consultas deben poder filtrarse por estos campos en reportes
+
+## Evolución Futura
+
+- Eventualmente, estos valores podrán obtenerse dinámicamente:
+  - A través de un sistema de autenticación
+  - Por medio de una selección en la interfaz de usuario
+  - Desde una cookie o token de sesión
+  - Desde una integración con el directorio de usuarios
+
+- El sistema debe diseñarse para facilitar esta evolución, sin requerir cambios estructurales en:
+  - Esquema de datos
+  - Estructura de logs
+
+  - Contratos de API 

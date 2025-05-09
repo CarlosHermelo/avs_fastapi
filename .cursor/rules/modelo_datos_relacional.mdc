@@ -1,0 +1,107 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# 📘 Modelo de Datos del Asistente Virtual - Reglas de Proyecto
+
+Este documento describe las tablas principales del sistema, su función y los campos asociados. Está diseñado para orientar el desarrollo, mantenimiento y monitoreo del asistente virtual con GenAI en producción.
+
+---
+
+## 🗂️ Tabla: `usuarios`
+
+**Función:**  
+Registra los agentes humanos que utilizan el asistente virtual. Se usa para asociar cada consulta con el usuario que la realizó.
+
+**Campos:**
+- `id_usuario`: ID único del usuario (clave primaria).
+- `nombre`: Nombre del agente.
+- `ugl_origen`: Unidad de Gestión Local (zona de trabajo).
+
+---
+
+## 🗂️ Tabla: `prompts`
+
+**Función:**  
+Administra los prompts del asistente virtual, con control de versiones y activación. Permite que un administrador pruebe un prompt antes de activarlo globalmente.
+
+**Campos:**
+- `id_prompt`: ID único del prompt.
+- `nombre_prompt`: Nombre descriptivo del prompt.
+- `contenido_prompt`: Texto del prompt.
+- `version`: Número de versión.
+- `activo`: Si es el prompt actualmente en uso (booleano).
+- `fecha_creacion`: Fecha de creación o modificación.
+
+---
+
+## 🗂️ Tabla: `consultas`
+
+**Función:**  
+Registra cada interacción entre un usuario y el asistente virtual. Incluye la pregunta, la respuesta, datos técnicos, posibles errores y calidad de la respuesta.
+
+**Campos:**
+- `id_consulta`: ID único de la consulta.
+- `timestamp`: Fecha y hora de la consulta.
+- `id_usuario`: Relación con la tabla `usuarios`.
+- `ugel_origen`: Zona del usuario que hizo la consulta.
+- `pregunta_usuario`: Texto ingresado por el agente.
+- `respuesta_asistente`: Respuesta generada por el asistente.
+- `respuesta_es_vacia`: Si la respuesta fue del tipo "no tengo información".
+- `respuesta_util`: Si el usuario consideró útil la respuesta.
+- `id_prompt_usado`: ID del prompt usado en esa interacción.
+- `tokens_input`: Tokens enviados al modelo.
+- `tokens_output`: Tokens devueltos por el modelo.
+- `tiempo_respuesta_ms`: Tiempo que tardó la respuesta.
+- `error_detectado`: Si hubo un error técnico en la ejecución.
+- `tipo_error`: Tipo de error detectado (si existió).
+- `mensaje_error`: Detalles del error técnico.
+- `origen_canal`: Canal desde el que se originó la consulta (web, intranet, etc.).
+- `modelo_llm_usado`: Modelo LLM utilizado (ej: GPT-4, Mistral).
+
+---
+
+## 🗂️ Tabla: `feedback_respuesta` *(opcional)*
+
+**Función:**  
+Registra comentarios detallados o calificaciones sobre la respuesta. Útil si se requiere más que un simple “útil/no útil”.
+
+**Campos:**
+- `id_feedback`: ID del feedback.
+- `id_consulta`: Relación con `consultas`.
+- `id_usuario`: Usuario que hizo el feedback.
+- `utilidad_respuesta`: Enum con útil / no útil / neutral.
+- `comentario`: Comentario libre.
+- `fecha`: Timestamp del feedback.
+
+---
+
+## 🗂️ Tabla: `log_batch_bdv`
+
+**Función:**  
+Controla la ejecución de procesos batch que actualizan la base vectorial (bdv). Indica si se generó el JSON, si la carga fue exitosa y si la bdv quedó consistente.
+
+**Campos:**
+- `id_batch`: ID del batch.
+- `fecha_ejecucion`: Fecha del proceso.
+- `json_generado`: Si se generó el archivo con embeddings.
+- `carga_exitosa`: Si se cargó exitosamente a la bdv.
+- `estado_bdv`: Estado final de la bdv tras la carga.
+- `mensaje_log`: Detalles de la ejecución o errores.
+
+---
+
+## 🗂️ Tabla: `log_arranque_app`
+
+**Función:**  
+Registra cada vez que se inicia la aplicación backend (FastAPI), e indica si las dependencias críticas están funcionando (bdv y base relacional).
+
+**Campos:**
+- `id_arranque`: ID del arranque.
+- `timestamp`: Fecha y hora del inicio.
+- `bd_vectorial_ok`: Si la bdv estaba conectada correctamente.
+- `bd_relacional_ok`: Si la base de métricas estaba disponible.
+- `mensaje_error`: Detalles si hubo fallos durante el arranque.
+
+

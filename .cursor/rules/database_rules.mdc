@@ -1,0 +1,70 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Reglas Base de Datos Dual (MySQL/SQLite)
+
+## Configuración Básica
+
+- La configuración siempre se lee del archivo `.env` en la raíz
+- El tipo de base de datos se define con `DB_TYPE` (valores: mysql, sqlite)
+- En entorno de desarrollo local se recomienda `DB_TYPE=sqlite`
+- En producción usar `DB_TYPE=mysql`
+
+## Reglas de Conexión
+
+1. **MySQL**
+   - Credenciales: BD_SERVER, BD_PORT, BD_NAME, BD_USER, BD_PASSWD
+   - Codificación: usar siempre charset=utf8mb4
+   - Incluir manejo de timeouts (connect_timeout=60)
+   - Verificar la conexión antes de continuar
+
+2. **SQLite**
+   - Ubicación del archivo se define con SQLITE_PATH
+   - Crear directorio si no existe
+   - Activar soporte para claves foráneas con PRAGMA
+   - Recrear tablas completamente en cada ejecución
+
+## Estructura de Datos
+
+1. **Tipos de Datos**
+   - MySQL: Usar ENUM para campos con valores predefinidos
+   - SQLite: Usar String en lugar de ENUM (para compatibilidad)
+   - Usar los mismos nombres de columnas en ambos motores
+
+2. **Claves Foráneas**
+   - Crear tablas en orden correcto para respetar dependencias
+   - MySQL: Desactivar verificación con SET FOREIGN_KEY_CHECKS=0 durante creación
+   - SQLite: Activar verificación con PRAGMA foreign_keys=ON
+   - Esperar confirmación de creación de cada tabla
+
+3. **Orden de Tablas**
+   1. usuarios
+   2. prompts
+   3. log_batch_bdv
+   4. log_arranque_app
+   5. consultas
+   6. feedback_respuesta
+
+## Datos de Prueba
+
+- Activar con el parámetro --test
+- Se crearán automáticamente:
+  - 2 usuarios de prueba
+  - 1 prompt activo
+  - Registros en las tablas con relaciones
+- Usar transacciones para inserción de datos
+- Hacer rollback en caso de error
+
+## Manejo de Errores
+
+1. **Errores de Conexión**
+   - Si falla MySQL, intentar con SQLite automáticamente
+   - Mostrar mensaje claro indicando qué motor se está usando
+   - Registrar errores con detalles en la consola
+
+2. **Errores de Creación**
+   - Mostrar nombre de tabla que falló
+   - Detallar el tipo de error (clave foránea, tipo de dato, etc.)
+   - Interrumpir proceso en caso de error crítico 

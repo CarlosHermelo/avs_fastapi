@@ -94,6 +94,14 @@
             margin-top: 10px;
             font-size: 0.9em;
         }
+        .user-info {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f0f7fb;
+            border-radius: 4px;
+            font-size: 0.9em;
+            color: #34495e;
+        }
     </style>
 </head>
 <body>
@@ -102,6 +110,11 @@
         <form id="questionForm">
             <label for="question">Pregunta:</label>
             <textarea id="question" required placeholder="Ingrese su pregunta..."></textarea>
+            
+            <div class="user-info">
+                <p><strong>ID Usuario:</strong> 321 (Agente de atención)</p>
+                <p><strong>UGL Origen:</strong> Formosa</p>
+            </div>
             
             <p class="info-text">Nota: La cantidad de documentos y el rango de fechas se configuran en el servidor.</p>
             
@@ -125,6 +138,10 @@
             // Obtener valores del formulario
             const question = document.getElementById('question').value;
             
+            // Valores fijos para identificación de usuario y origen
+            const id_usuario = 321;
+            const ugel_origen = "Formosa";
+            
             // Mostrar spinner y ocultar respuesta anterior
             document.getElementById('spinner').style.display = 'block';
             document.getElementById('responseContainer').style.display = 'none';
@@ -138,7 +155,9 @@
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        question_input: question
+                        question_input: question,
+                        id_usuario: id_usuario,         // ID del usuario actual
+                        ugel_origen: ugel_origen        // UGL de origen del usuario
                     })
                 });
                 
@@ -158,7 +177,8 @@
                 document.getElementById('metadata').innerHTML = `
                     <strong>Modelo:</strong> ${metadata.model || 'No disponible'}<br>
                     <strong>Documentos recuperados:</strong> ${metadata.document_count || 0}<br>
-                    <strong>Periodo consultado:</strong> ${metadata.fecha_desde} a ${metadata.fecha_hasta}
+                    <strong>Periodo consultado:</strong> ${metadata.fecha_desde} a ${metadata.fecha_hasta}<br>
+                    <strong>Usuario:</strong> ${id_usuario} | <strong>UGL:</strong> ${ugel_origen}
                 `;
                 
                 // Mostrar el contenedor de respuesta

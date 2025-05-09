@@ -117,6 +117,15 @@ async def handle_complete_analysis(
     log_message(f"##############-------INICIO COMPLETE_ANALYSIS (Qdrant)----------#####################")
     log_message(f"[DEBUG-COMPLETE] Recibida solicitud completa con datos: {request}")
     
+    # Registrar información de usuario y UGL
+    id_usuario = getattr(request, 'id_usuario', None)
+    ugel_origen = getattr(request, 'ugel_origen', None)
+    
+    if id_usuario:
+        log_message(f"[DEBUG-COMPLETE] ID de usuario: {id_usuario}")
+    if ugel_origen:
+        log_message(f"[DEBUG-COMPLETE] UGL de origen: {ugel_origen}")
+    
     # Registrar timestamp inicial
     start_time = datetime.datetime.now()
     log_message(f"Iniciando análisis completo a las: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -389,6 +398,10 @@ Estructura breve: Usa puntos clave, numeración o listas de una sola línea si e
 Pregunta: {request.question_input}
 """
         
+        # Agregar información del usuario y UGL al contexto si están disponibles
+        if id_usuario and ugel_origen:
+            log_message(f"Agregando información de usuario (ID: {id_usuario}) y UGL ({ugel_origen}) al contexto")
+            
         # Registramos tokens de la pregunta inicial
         tokens_pregunta = contar_tokens(question_with_context, model_name)
         log_message(f"Tokens de la pregunta inicial: {tokens_pregunta}")
@@ -484,7 +497,9 @@ Pregunta: {request.question_input}
                     "processing_time_seconds": processing_time,
                     "tokens_in": tokens_totales_entrada,
                     "tokens_out": tokens_respuesta,
-                    "tokens_total": tokens_totales_entrada + tokens_respuesta
+                    "tokens_total": tokens_totales_entrada + tokens_respuesta,
+                    "id_usuario": id_usuario,
+                    "ugel_origen": ugel_origen
                 }
             }
             
