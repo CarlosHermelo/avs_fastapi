@@ -1,12 +1,20 @@
+import sys # Asegurarse de que sys está importado
+import os # Asegurarse de que os está importado
+
+# Añadir el directorio raíz del proyecto a sys.path
+# Esto permite que el script encuentre el módulo 'app'
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from dotenv import load_dotenv
-import os
-import sys
 import time
 import traceback
-from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, ForeignKey, DateTime, MetaData, event
+from sqlalchemy import create_engine, text, text, Column, Integer, String, Text, Boolean, ForeignKey, DateTime, MetaData, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 from datetime import datetime
+# from app.core.logging_config import log_message, get_logger # Comentamos o eliminamos esta línea si solo se usaba para get_engine
 
 # Cargar variables de entorno
 load_dotenv()
@@ -18,8 +26,21 @@ DB_PORT = os.getenv("BD_PORT", "3306")
 DB_NAME = os.getenv("BD_NAME", "avsp")
 DB_USER = os.getenv("BD_USER", "root")
 DB_PASS = os.getenv("BD_PASSWD", "")
-# Ruta para la base SQLite
-SQLITE_PATH = os.getenv("SQLITE_PATH", "BD_RELA/local_database.db")
+
+# Ruta para la base SQLite - CONSTRUCCIÓN MEJORADA
+DEFAULT_SQLITE_FILENAME = "local_database.db"
+SQLITE_DIR_RELATIVE_TO_ROOT = "BD_RELA" # Directorio donde queremos el sqlite, relativo a la raíz del proyecto
+
+# Primero, intenta obtener la ruta completa desde la variable de entorno .env
+SQLITE_PATH_FROM_ENV = os.getenv("SQLITE_PATH")
+
+if SQLITE_PATH_FROM_ENV:
+    SQLITE_PATH = SQLITE_PATH_FROM_ENV
+    # print(f"Usando SQLITE_PATH desde .env: {SQLITE_PATH}") # Log de depuración opcional
+else:
+    # Si no está en .env, construir la ruta relativa a la raíz del proyecto detectada (project_root)
+    SQLITE_PATH = os.path.join(project_root, SQLITE_DIR_RELATIVE_TO_ROOT, DEFAULT_SQLITE_FILENAME)
+    # print(f"SQLITE_PATH no encontrado en .env. Usando ruta por defecto construida: {SQLITE_PATH}") # Log de depuración opcional
 
 # Crear metadata y base declarativa
 metadata = MetaData()
@@ -40,7 +61,6 @@ def get_engine():
             # Construir URL de conexión para MySQL
             DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
             
-            # Crear motor para MySQL
             engine = create_engine(
                 DATABASE_URL,
                 pool_recycle=3600,
@@ -51,28 +71,24 @@ def get_engine():
                 }
             )
             
-            # Verificar la conexión
             with engine.connect() as conn:
-                conn.execute("SELECT 1")
-                print("Conexión a MySQL exitosa.")
+                conn.execute(text("SELECT 1"))
+                print(f"Conexión a MySQL ({DB_NAME}@{DB_HOST}) exitosa.")
                 
             current_engine_type = "mysql"
             return engine
         except Exception as e:
-            print(f"Error al conectar con MySQL: {e}")
+            print(f"Error al conectar con MySQL ({DB_NAME}@{DB_HOST}): {e}")
             print("Intentando con SQLite como alternativa...")
     
     # Si falla MySQL o está configurado para SQLite, usar SQLite
     print(f"Usando SQLite en {SQLITE_PATH}")
     sqlite_url = f"sqlite:///{SQLITE_PATH}"
     
-    # Crear el directorio para el archivo de base de datos si no existe
     os.makedirs(os.path.dirname(os.path.abspath(SQLITE_PATH)), exist_ok=True)
     
-    # Crear motor SQLite
     engine = create_engine(sqlite_url)
     
-    # Configuración para habilitar claves foráneas en SQLite
     @event.listens_for(engine, "connect")
     def set_sqlite_pragma(dbapi_connection, connection_record):
         cursor = dbapi_connection.cursor()
@@ -80,6 +96,7 @@ def get_engine():
         cursor.close()
     
     current_engine_type = "sqlite"
+    print(f"Conexión a SQLite ({SQLITE_PATH}) establecida.")
     return engine
 
 # Definir modelos
@@ -184,11 +201,21 @@ def crear_tablas():
             try:
                 # Desactivar verificación de claves foráneas temporalmente
                 with engine.connect() as conn:
-                    conn.execute("SET FOREIGN_KEY_CHECKS=0")
+                    conn.execute(text("SET FOREIGN_KEY_CHECKS=0"))
                     conn.commit()
                     print("Verificación de claves foráneas desactivada temporalmente.")
             except Exception as e:
                 print(f"Aviso: {e}")
+                print("No se pudo desactivar la verificación de claves foráneas. Intentando con otro método...")
+                try:
+                    # Alternativa usando execute con connection directa
+                    connection = engine.raw_connection()
+                    cursor = connection.cursor()
+                    cursor.execute("SET FOREIGN_KEY_CHECKS=0")
+                    connection.commit()
+                    print("Verificación de claves foráneas desactivada con método alternativo.")
+                except Exception as e2:
+                    print(f"Error al desactivar claves foráneas: {e2}")
         
         # Eliminar tablas si existen en orden inverso a las dependencias
         print("\nEliminando tablas existentes para recrearlas...")
@@ -199,6 +226,14 @@ def crear_tablas():
                 print(f"Tabla '{tabla_nombre}' eliminada si existía.")
             except Exception as e:
                 print(f"Nota al eliminar '{tabla_nombre}': {e}")
+                print(f"Intentando eliminar '{tabla_nombre}' con SQL directo...")
+                try:
+                    with engine.connect() as conn:
+                        conn.execute(text(f"DROP TABLE IF EXISTS {tabla_nombre}"))
+                        conn.commit()
+                        print(f"Tabla '{tabla_nombre}' eliminada con SQL directo.")
+                except Exception as e2:
+                    print(f"No se pudo eliminar '{tabla_nombre}': {e2}")
         
         # Crear tablas en orden específico para manejar claves foráneas
         print("\nCreando tablas...")
@@ -229,11 +264,20 @@ def crear_tablas():
         if current_engine_type == "mysql":
             try:
                 with engine.connect() as conn:
-                    conn.execute("SET FOREIGN_KEY_CHECKS=1")
+                    conn.execute(text("SET FOREIGN_KEY_CHECKS=1"))
                     conn.commit()
                     print("Verificación de claves foráneas reactivada.")
             except Exception as e:
                 print(f"Aviso: {e}")
+                try:
+                    # Alternativa usando execute con connection directa
+                    connection = engine.raw_connection()
+                    cursor = connection.cursor()
+                    cursor.execute("SET FOREIGN_KEY_CHECKS=1")
+                    connection.commit()
+                    print("Verificación de claves foráneas reactivada con método alternativo.")
+                except Exception as e2:
+                    print(f"Error al reactivar claves foráneas: {e2}")
         
         print("\nProceso finalizado. Todas las tablas han sido creadas con claves foráneas.")
         

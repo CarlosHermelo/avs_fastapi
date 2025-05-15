@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Consulta de Datos</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .filtro, .resultado { margin-bottom: 20px; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ccc; padding: 8px; }
+    </style>
+</head>
+<body>
+
+    <h2>Filtro de búsqueda</h2>
+    <div class="filtro">
+        <form action="/buscar" method="get">
+            <label for="campo">Buscar por nombre:</label>
+            <input type="text" id="campo" name="nombre" required>
+            <button type="submit">Buscar</button>
+        </form>
+    </div>
+
+    <h2>Resultados</h2>
+    <div class="resultado">
+        <!-- Esta tabla se llenará con los datos desde el backend -->
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Nombre</th>
+                    <th>Email</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Ejemplo de filas, estas deberían venir del backend -->
+                <tr>
+                    <td>1</td>
+                    <td>Juan Pérez</td>
+                    <td>juan@example.com</td>
+                </tr>
+                <tr>
+                    <td>2</td>
+                    <td>Ana Gómez</td>
+                    <td>ana@example.com</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+</body>
+</html>

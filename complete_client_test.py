@@ -7,7 +7,7 @@ import sys
 def print_separator(character='=', length=80):
     print(character * length)
 
-def query_complete_analysis(question, fecha_desde=None, fecha_hasta=None, k=None):
+def query_complete_analysis(question, fecha_desde=None, fecha_hasta=None, k=None, id_usuario=321, ugel_origen="Formosa"):
     """
     Consulta el endpoint de análisis completo con los parámetros especificados
     
@@ -16,6 +16,8 @@ def query_complete_analysis(question, fecha_desde=None, fecha_hasta=None, k=None
         fecha_desde (str): Fecha de inicio en formato YYYY-MM-DD
         fecha_hasta (str): Fecha de fin en formato YYYY-MM-DD
         k (int): Número de documentos a recuperar
+        id_usuario (int): ID del usuario que realiza la consulta (default: 321)
+        ugel_origen (str): Unidad de Gestión Local del agente (default: "Formosa")
         
     Returns:
         dict: Respuesta del servidor
@@ -36,7 +38,9 @@ def query_complete_analysis(question, fecha_desde=None, fecha_hasta=None, k=None
         "question_input": question,
         "fecha_desde": fecha_desde,
         "fecha_hasta": fecha_hasta,
-        "k": k
+        "k": k,
+        "id_usuario": id_usuario,
+        "ugel_origen": ugel_origen
     }
     
     print_separator()
@@ -46,6 +50,8 @@ def query_complete_analysis(question, fecha_desde=None, fecha_hasta=None, k=None
     print(f"Pregunta: {question}")
     print(f"Periodo: {fecha_desde} a {fecha_hasta}")
     print(f"Documentos a recuperar (k): {k}")
+    print(f"ID Usuario: {id_usuario}")
+    print(f"UGEL Origen: {ugel_origen}")
     print_separator()
     
     try:
@@ -64,6 +70,11 @@ def query_complete_analysis(question, fecha_desde=None, fecha_hasta=None, k=None
             metadata = data.get('metadata', {})
             print(f"Modelo utilizado: {metadata.get('model', 'No disponible')}")
             print(f"Documentos recuperados: {metadata.get('document_count', 0)}")
+            print(f"Tokens entrada: {metadata.get('input_tokens', 'No disponible')}")
+            print(f"Tokens salida: {metadata.get('output_tokens', 'No disponible')}")
+            print(f"Total tokens: {metadata.get('total_tokens', 'No disponible')}")
+            print(f"ID Usuario: {metadata.get('id_usuario', 'No disponible')}")
+            print(f"UGEL Origen: {metadata.get('ugel_origen', 'No disponible')}")
             print_separator()
             
             # Mostrar respuesta
@@ -97,8 +108,12 @@ def main():
     fecha_hasta = sys.argv[3] if len(sys.argv) > 3 else None
     k = int(sys.argv[4]) if len(sys.argv) > 4 else None
     
+    # Parámetros obligatorios según las reglas del proyecto
+    id_usuario = 321  # ID fijo según reglas
+    ugel_origen = "Formosa"  # Valor fijo según reglas
+    
     # Realizar la consulta
-    query_complete_analysis(question, fecha_desde, fecha_hasta, k)
+    query_complete_analysis(question, fecha_desde, fecha_hasta, k, id_usuario, ugel_origen)
 
 if __name__ == "__main__":
     main() 
