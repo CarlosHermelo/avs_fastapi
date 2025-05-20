@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Estadísticas de Utilidad de Respuestas - Admin</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f6f8; }
+        .container { max-width: 900px; margin: auto; background-color: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; text-align: center; margin-bottom: 25px; }
+        .filters { margin-bottom: 25px; padding: 20px; border: 1px solid #dfe6e9; border-radius: 6px; background-color: #f9fafb; display: flex; align-items: center; justify-content: center; gap: 15px;}
+        .filters label { font-weight: bold; color: #34495e;}
+        .filters input[type="date"] { padding: 10px; border: 1px solid #bdc3c7; border-radius: 4px; font-size: 14px; }
+        .filters button { padding: 10px 18px; background-color: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 15px; transition: background-color 0.3s ease; }
+        .filters button:hover { background-color: #2980b9; }
+        .chart-container { width: 100%; max-width: 700px; margin: 30px auto; padding: 20px; border: 1px solid #dfe6e9; border-radius: 6px; background-color: #fdfdfd; }
+        .loading-spinner { display: none; text-align: center; padding: 20px; }
+        .loading-spinner::after {
+            content: ""; display: inline-block; width: 30px; height: 30px;
+            border: 4px solid rgba(52, 152, 219, 0.2); border-radius: 50%;
+            border-top-color: #3498db; animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .error-message { color: #e74c3c; font-weight: bold; margin-top: 15px; text-align: center; }
+        .no-data { text-align: center; padding: 20px; font-style: italic; color: #7f8c8d; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Estadísticas de Utilidad de Respuestas</h1>
+
+        <div class="filters">
+            <label for="fecha_desde">Fecha Desde:</label>
+            <input type="date" id="fecha_desde" name="fecha_desde">
+
+            <label for="fecha_hasta">Fecha Hasta:</label>
+            <input type="date" id="fecha_hasta" name="fecha_hasta">
+
+            <button onclick="actualizarGrafico()">Generar Gráfico</button>
+        </div>
+
+        <div id="loadingSpinner" class="loading-spinner">Cargando datos...</div>
+        <div id="errorMessage" class="error-message" style="display:none;"></div>
+        
+        <div class="chart-container">
+            <canvas id="respuestaUtilChart"></canvas>
+            <div id="noDataMessage" class="no-data" style="display:none;">No hay datos para mostrar con los filtros aplicados.</div>
+        </div>
+    </div>
+
+    <script>
+        const SERVER_URL = window.location.hostname.includes('localhost') || window.location.hostname.includes('127.0.0.1') ?
+            `http://${window.location.host}` : '';
+        const API_ENDPOINT_STATS_RESPUESTA_UTIL = `${SERVER_URL}/api/admin/stats/respuesta_util_por_fecha`;
+        
+        let chartInstance = null;
+
+        async function fetchDataForChart(fechaDesde, fechaHasta) {
+            const spinner = document.getElementById('loadingSpinner');
+            const errorMessageDiv = document.getElementById('errorMessage');
+            const noDataMessageDiv = document.getElementById('noDataMessage');
+
+            spinner.style.display = 'block';
+            errorMessageDiv.style.display = 'none';
+            noDataMessageDiv.style.display = 'none';
+
+            let queryParams = new URLSearchParams();
+            if (fechaDesde) queryParams.append('fecha_desde', fechaDesde);
+            if (fechaHasta) queryParams.append('fecha_hasta', fechaHasta);
+
+            const apiUrl = `${API_ENDPOINT_STATS_RESPUESTA_UTIL}?${queryParams.toString()}`;
+            console.log('DEBUG - URL de API a consultar:', apiUrl);
+
+            try {
+                const response = await fetch(apiUrl);
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ detail: "Error desconocido del servidor." }));
+                    throw new Error(`Error ${response.status}: ${errorData.detail || response.statusText}`);
+                }
+                const data = await response.json();
+                console.log('DEBUG - Datos recibidos para el gráfico:', data);
+                return data;
+            } catch (error) {
+                console.error('DEBUG - Error en fetch:', error);
+                errorMessageDiv.textContent = "Error al cargar datos para el gráfico: " + error.message;
+                errorMessageDiv.style.display = 'block';
+                return null;
+            } finally {
+                spinner.style.display = 'none';
+            }
+        }
+
+        function renderChart(data) {
+            const ctx = document.getElementById('respuestaUtilChart').getContext('2d');
+            const noDataMessageDiv = document.getElementById('noDataMessage');
+
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            if (!data || data.labels.length === 0) {
+                noDataMessageDiv.style.display = 'block';
+                document.getElementById('respuestaUtilChart').style.display = 'none';
+                return;
+            }
+            
+            document.getElementById('respuestaUtilChart').style.display = 'block';
+            noDataMessageDiv.style.display = 'none';
+
+            const backgroundColors = [
+                'rgba(75, 192, 192, 0.6)',  // si (verde azulado)
+                'rgba(255, 99, 132, 0.6)',   // no (rojo)
+                'rgba(201, 203, 207, 0.6)', // nada (gris)
+                'rgba(255, 205, 86, 0.6)',  // otros (amarillo)
+                'rgba(54, 162, 235, 0.6)',  // otros (azul)
+                'rgba(153, 102, 255, 0.6)'  // otros (morado)
+            ];
+
+            const borderColors = [
+                'rgba(75, 192, 192, 1)',
+                'rgba(255, 99, 132, 1)',
+                'rgba(201, 203, 207, 1)',
+                'rgba(255, 205, 86, 1)',
+                'rgba(54, 162, 235, 1)',
+                'rgba(153, 102, 255, 1)'
+            ];
+            
+            // Mapear etiquetas a colores predefinidos y manejar casos no esperados
+            const chartBackgroundColors = data.labels.map(label => {
+                if (label.toLowerCase() === 'si') return backgroundColors[0];
+                if (label.toLowerCase() === 'no') return backgroundColors[1];
+                if (label.toLowerCase() === 'nada') return backgroundColors[2];
+                // Para valores inesperados, usar colores de la paleta secuencialmente
+                const otherIndex = data.labels.indexOf(label) % (backgroundColors.length -3) +3;
+                return backgroundColors[otherIndex];
+            });
+             const chartBorderColors = data.labels.map(label => {
+                if (label.toLowerCase() === 'si') return borderColors[0];
+                if (label.toLowerCase() === 'no') return borderColors[1];
+                if (label.toLowerCase() === 'nada') return borderColors[2];
+                const otherIndex = data.labels.indexOf(label) % (borderColors.length -3) +3;
+                return borderColors[otherIndex];
+            });
+
+
+            chartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: data.labels,
+                    datasets: [{
+                        label: 'Cantidad de Respuestas',
+                        data: data.values,
+                        backgroundColor: chartBackgroundColors,
+                        borderColor: chartBorderColors,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 1 // Mostrar solo enteros en el eje Y
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                        },
+                        title: {
+                            display: true,
+                            text: 'Distribución de Utilidad de Respuestas'
+                        }
+                    }
+                }
+            });
+        }
+
+        async function actualizarGrafico() {
+            const fechaDesde = document.getElementById('fecha_desde').value;
+            const fechaHasta = document.getElementById('fecha_hasta').value;
+            
+            const data = await fetchDataForChart(fechaDesde, fechaHasta);
+            if (data) {
+                renderChart(data);
+            }
+        }
+
+        window.onload = () => {
+            // Establecer fechas por defecto: último mes
+            const आज = new Date();
+            const unMesAtras = new Date();
+            unMesAtras.setMonth(आज.getMonth() - 1);
+
+            document.getElementById('fecha_hasta').value = आज.toISOString().split('T')[0];
+            document.getElementById('fecha_desde').value = unMesAtras.toISOString().split('T')[0];
+            
+            actualizarGrafico(); // Cargar el gráfico con los valores por defecto
+        };
+    </script>
+</body>
+</html> 

@@ -1,5 +1,5 @@
 # app/api/endpoints.py
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from app.models.schemas import QuestionRequest, AnswerResponse, CompleteAnalysisRequest, CompleteAnalysisResponse
 from app.services.process_question import process_question, retrieve_stats
 from app.services.token_utils import contar_tokens, count_words, validar_palabras, reducir_contenido_por_palabras
@@ -20,6 +20,11 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from app.core.config import model_name, collection_name_fragmento, qdrant_url, max_results, openai_api_key
 from app.core.logging_config import log_message, get_logger
 from app.core.dependencies import get_embeddings, get_qdrant_client, get_vector_store_endpoint, get_llm
+import sqlite3
+import pymysql
+from dotenv import load_dotenv
+from typing import Optional, List, Dict, Any
+from pydantic import BaseModel
 
 # Obtener el logger
 logger = get_logger()
@@ -574,11 +579,12 @@ Pregunta: {request.question_input}
                     "document_count": retrieve_stats.document_count,
                     "model": model_name,
                     "processing_time_ms": tiempo_respuesta_ms,
-                    "input_tokens": tokens_entrada,  # Incluir en metadata
-                    "output_tokens": tokens_salida,  # Incluir en metadata
-                    "total_tokens": tokens_entrada + tokens_salida,  # Incluir en metadata
+                    "input_tokens": tokens_entrada,
+                    "output_tokens": tokens_salida,
+                    "total_tokens": tokens_entrada + tokens_salida,
                     "id_usuario": id_usuario if id_usuario is not None else 321,
-                    "ugel_origen": ugel_origen if ugel_origen is not None else "Formosa"
+                    "ugel_origen": ugel_origen if ugel_origen is not None else "Formosa",
+                    "id_consulta": id_nueva_consulta if 'id_nueva_consulta' in locals() and id_nueva_consulta is not None else None
                 }
             }
             
@@ -663,7 +669,8 @@ Pregunta: {request.question_input}
                     "output_tokens": tokens_salida_error,
                     "total_tokens": tokens_entrada_error + tokens_salida_error,
                     "id_usuario": id_usuario if id_usuario is not None else 321,
-                    "ugel_origen": ugel_origen if ugel_origen is not None else "Formosa"
+                    "ugel_origen": ugel_origen if ugel_origen is not None else "Formosa",
+                    "id_consulta": id_consulta_error if 'id_consulta_error' in locals() and id_consulta_error is not None else None
                 }
             }
     
@@ -671,3 +678,746 @@ Pregunta: {request.question_input}
         log_message(f"[ERROR-GENERAL] Error inesperado: {str(e)}", level="ERROR")
         log_message(traceback.format_exc(), level="ERROR")
         raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
+# Cargar variables de entorno. Ajusta la ruta si es necesario.
+# Usualmente, si .env está en la raíz del proyecto y ejecutas desde ahí, no se necesita dotenv_path.
+# Pero si ejecutas endpoints.py directamente o desde otro subdirectorio, podría ser útil.
+dotenv_path = os.path.join(os.path.dirname(__file__), '..', '..', '.env') # Sube dos niveles desde app/api/
+if os.path.exists(dotenv_path):
+    load_dotenv(dotenv_path=dotenv_path)
+else:
+    # Fallback si no se encuentra en la ruta esperada, intenta cargar desde el directorio actual o raíz
+    load_dotenv()
+
+# Modelo Pydantic para la solicitud de feedback
+class FeedbackRequest(BaseModel):
+    id_consulta: int
+    feedback_value: str # Esperamos "me_gusta" o "no_me_gusta"
+
+# Modelo Pydantic para la respuesta de cada consulta
+class ConsultaAdminItem(BaseModel):
+    id_consulta: int
+    timestamp: datetime.datetime # FastAPI manejará la serialización a string ISO
+    id_usuario: int
+    ugel_origen: str
+    pregunta_usuario_completa: str # Nombre cambiado para claridad
+    pregunta_usuario_truncada: str
+    respuesta_asistente_completa: str # Nombre cambiado para claridad
+    respuesta_asistente_truncada: str
+    respuesta_es_vacia: bool
+    respuesta_util: str # Cambiado de bool a str para soportar "si", "no", "nada"
+
+# --- Función de conexión a la BD (similar a la anterior, pero sin ser parte de Flask) ---
+def get_admin_db_connection():
+    conn = None
+    db_type_admin = os.getenv('DB_TYPE', 'sqlite') # Usar una variable diferente o la misma si la config es igual
+    
+    # Intentar con MySQL primero si está configurado
+    if db_type_admin == 'mysql':
+        try:
+            conn = pymysql.connect(
+                host=os.getenv('BD_SERVER'),
+                port=int(os.getenv('BD_PORT', 3306)),
+                user=os.getenv('BD_USER'),
+                password=os.getenv('BD_PASSWD'),
+                database=os.getenv('BD_NAME'),
+                charset='utf8mb4',
+                cursorclass=pymysql.cursors.DictCursor, # Devuelve filas como diccionarios
+                connect_timeout=60
+            )
+            logger.info("Conectado a MySQL para admin.")
+            return conn
+        except Exception as e:
+            logger.error(f"Error al conectar a MySQL para admin: {e}")
+            logger.error(traceback.format_exc())
+            logger.info("Intentando con SQLite como alternativa...")
+            # No retornar aún, intentar con SQLite
+    
+    # Si no es MySQL o falló la conexión a MySQL, intentar con SQLite
+    try:
+        # Ajusta la ruta a tu archivo SQLite según sea necesario
+        # Esta ruta es relativa al punto de ejecución del script.
+        # Si .env define SQLITE_PATH, debería ser una ruta absoluta o relativa al CWD.
+        sqlite_path_admin = os.getenv('SQLITE_PATH', 'BD_RELA/local_database.db')
+        
+        # Verificar si el archivo existe
+        if not os.path.exists(sqlite_path_admin):
+            logger.warning(f"SQLite file not found at {sqlite_path_admin}, looking in alternate locations")
+            # Intentar con ubicaciones alternativas
+            alt_paths = [
+                'db/simap_assistant.db',
+                'BD_RELA/local_database.db',
+                '../BD_RELA/local_database.db'
+            ]
+            for alt_path in alt_paths:
+                if os.path.exists(alt_path):
+                    sqlite_path_admin = alt_path
+                    logger.info(f"Found SQLite database at alternate location: {sqlite_path_admin}")
+                    break
+
+        conn = sqlite3.connect(sqlite_path_admin)
+        conn.row_factory = sqlite3.Row # Para acceder a columnas por nombre
+        conn.execute("PRAGMA foreign_keys = ON")
+        logger.info(f"Conectado a SQLite para admin en: {sqlite_path_admin}")
+        return conn
+    except Exception as e:
+        logger.error(f"Error al conectar a SQLite para admin: {e}")
+        logger.error(traceback.format_exc())
+        return None
+
+# Nuevo endpoint para la interfaz de administración de consultas
+@router.get("/admin/consultas_filtradas", response_model=List[ConsultaAdminItem])
+async def obtener_consultas_filtradas_admin(
+    fecha_desde: Optional[str] = Query(None, description="Fecha desde (YYYY-MM-DD)"),
+    fecha_hasta: Optional[str] = Query(None, description="Fecha hasta (YYYY-MM-DD)"),
+    respuesta_es_vacia: Optional[int] = Query(None, description="Filtrar por respuesta vacía (1 para Sí, 0 para No)"),
+    respuesta_util: Optional[str] = Query(None, description="Filtrar por respuesta útil ('si', 'no', 'nada')")
+):
+    try:
+        conn = get_admin_db_connection()
+        cursor = conn.cursor()
+
+        # Construir la consulta SQL base (agregado tokens_input y tokens_output)
+        query = """
+            SELECT 
+                id_consulta,
+                timestamp,
+                id_usuario,
+                ugel_origen,
+                pregunta_usuario,
+                respuesta_asistente,
+                respuesta_es_vacia,
+                respuesta_util,
+                tokens_input,
+                tokens_output
+            FROM consultas 
+            WHERE 1=1
+        """
+        params = []
+
+        # Agregar filtros según los parámetros recibidos
+        if fecha_desde:
+            query += " AND DATE(timestamp) >= ?"
+            params.append(fecha_desde)
+        
+        if fecha_hasta:
+            query += " AND DATE(timestamp) <= ?"
+            params.append(fecha_hasta)
+        
+        if respuesta_es_vacia is not None:
+            query += " AND respuesta_es_vacia = ?"
+            params.append(respuesta_es_vacia)
+        
+        if respuesta_util is not None:
+            query += " AND respuesta_util = ?"
+            params.append(respuesta_util)  # 'si', 'no' o 'nada'
+
+        # Ordenar por timestamp descendente
+        query += " ORDER BY timestamp DESC"
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        
+        # Procesar los resultados
+        results = []
+        for row in rows:
+            pregunta_completa = row[4] or ""
+            respuesta_completa = row[5] or ""
+            
+            pregunta_truncada = pregunta_completa[:50] + "..." if len(pregunta_completa) > 50 else pregunta_completa
+            respuesta_truncada = respuesta_completa[:50] + "..." if len(respuesta_completa) > 50 else respuesta_completa
+            
+            results.append({
+                "id_consulta": row[0],
+                "timestamp": row[1],
+                "id_usuario": row[2],
+                "ugel_origen": row[3],
+                "pregunta_usuario_completa": pregunta_completa,
+                "pregunta_usuario_truncada": pregunta_truncada,
+                "respuesta_asistente_completa": respuesta_completa,
+                "respuesta_asistente_truncada": respuesta_truncada,
+                "respuesta_es_vacia": bool(row[6]),
+                "respuesta_util": row[7] if row[7] is not None else "nada",
+                "tokens_input": row[8] if row[8] is not None else 0,
+                "tokens_output": row[9] if row[9] is not None else 0
+            })
+        
+        cursor.close()
+        conn.close()
+        
+        return results
+
+    except Exception as e:
+        logger.error(f"Error al obtener consultas filtradas: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/feedback", summary="Registrar feedback para una consulta")
+async def handle_feedback(request: FeedbackRequest):
+    logger.info("--- INICIO Endpoint /api/feedback ---") # Log de inicio
+    logger.info(f"Recibida solicitud de feedback RAW: {request}")
+
+    id_consulta = request.id_consulta
+    feedback_str = request.feedback_value
+    logger.info(f"Procesando feedback para id_consulta: {id_consulta}, valor: {feedback_str}")
+
+    if feedback_str not in ["me_gusta", "no_me_gusta"]:
+        logger.warning(f"Valor de feedback no válido: {feedback_str} para id_consulta: {id_consulta}")
+        # Devolver un error HTTP claro pero no hacer que el servidor falle
+        raise HTTPException(status_code=400, detail="Valor de feedback no válido. Use 'me_gusta' o 'no_me_gusta'.")
+
+    # Mapear "me_gusta" a "si" y "no_me_gusta" a "no"
+    respuesta_util_valor = "si" if feedback_str == "me_gusta" else "no"
+    logger.info(f"Mapeado a respuesta_util (string): {respuesta_util_valor}")
+
+    conn = None 
+    try:
+        logger.info(f"Intentando obtener conexión a la BD para feedback (id_consulta: {id_consulta})")
+        conn = get_admin_db_connection() 
+        if not conn:
+            logger.error(f"Fallo al conectar a la BD para feedback (id_consulta: {id_consulta})")
+            # No hacer un error HTTP 503 aquí, registrar y retornar un mensaje de error JSON amigable
+            # Ya que el usuario quiere que "no hacer un error"
+            # return {"status": "error_interno", "message": "Error de conexión a la base de datos.", "id_consulta": id_consulta}
+            # Sin embargo, para el frontend, un error HTTP sigue siendo la forma estándar de comunicar esto.
+            # El "no hacer un error" se interpretará como no crashear el servidor y loguear bien.
+            raise HTTPException(status_code=503, detail="Error de conexión a la base de datos.")
+
+        logger.info(f"Conexión a BD exitosa para feedback (id_consulta: {id_consulta})")
+        cursor = conn.cursor()
+        db_type = os.getenv('DB_TYPE', 'sqlite')
+
+        sql_update_query = """
+            UPDATE consultas
+            SET respuesta_util = %s
+            WHERE id_consulta = %s
+        """
+        params_tuple = (respuesta_util_valor, id_consulta)
+
+        if db_type == 'sqlite':
+            sql_update_query = sql_update_query.replace('%s', '?')
+        
+        logger.info(f"Ejecutando UPDATE para feedback (id_consulta: {id_consulta}): Query: {sql_update_query.strip()} con Params: {params_tuple}")
+        cursor.execute(sql_update_query, params_tuple)
+        conn.commit()
+        logger.info(f"Commit de la transacción realizado para feedback (id_consulta: {id_consulta})")
+        
+        if cursor.rowcount == 0:
+            logger.warning(f"No se encontró consulta con id_consulta={id_consulta} para actualizar feedback. Filas afectadas: {cursor.rowcount}")
+            raise HTTPException(status_code=404, detail=f"No se encontró la consulta con ID {id_consulta}.")
+
+        logger.info(f"Feedback actualizado correctamente para id_consulta: {id_consulta}. Respuesta útil: {respuesta_util_valor}. Filas afectadas: {cursor.rowcount}")
+        return {"status": "success", "message": "Feedback registrado correctamente.", "id_consulta": id_consulta, "respuesta_util_actualizada": respuesta_util_valor}
+
+    except HTTPException as http_exc: # Re-lanzar HTTPExceptions conocidas
+        logger.error(f"HTTPException en /api/feedback (id_consulta: {id_consulta}): {http_exc.detail}")
+        raise http_exc 
+    except Exception as e:
+        if conn:
+            logger.info(f"Realizando rollback debido a excepción en /api/feedback (id_consulta: {id_consulta})")
+            conn.rollback() 
+        logger.error(f"Error EXCEPCIÓN GENERAL al actualizar feedback para id_consulta {id_consulta}: {str(e)}")
+        logger.error(traceback.format_exc()) # Log completo del traceback
+        # Enviar un error HTTP genérico para no exponer detalles internos
+        raise HTTPException(status_code=500, detail="Error interno del servidor al procesar feedback.")
+    finally:
+        if conn:
+            conn.close()
+            logger.info(f"Conexión a BD (feedback) cerrada para id_consulta: {id_consulta}")
+        logger.info("--- FIN Endpoint /api/feedback ---") # Log de fin
+
+# Clase para el formato de datos de estadísticas
+class EstadisticasResponse(BaseModel):
+    total_preguntas: int
+    total_tokens_input: int
+    total_tokens_output: int
+    utilidad: Dict[str, int]
+    respuesta_vacia: Dict[str, int]
+    ugel_preguntas: List[Dict[str, Any]]
+
+# Modelo Pydantic para la respuesta del gráfico de respuesta_util
+class RespuestaUtilChartResponse(BaseModel):
+    labels: List[str]
+    values: List[int]
+
+# Endpoint para obtener las UGELs disponibles
+@router.get("/admin/ugels_disponibles", response_model=List[str], summary="Obtener UGELs Disponibles")
+async def obtener_ugels_disponibles():
+    """
+    Obtiene la lista de UGELs únicas registradas en la base de datos
+    """
+    conn = get_admin_db_connection()
+    if not conn:
+        raise HTTPException(status_code=503, detail="No se pudo conectar a la base de datos para admin.")
+
+    try:
+        cursor = conn.cursor()
+        
+        query = """
+            SELECT DISTINCT ugel_origen 
+            FROM consultas 
+            WHERE ugel_origen IS NOT NULL AND ugel_origen != ''
+            ORDER BY ugel_origen
+        """
+        
+        cursor.execute(query)
+        ugels_raw = cursor.fetchall()
+        
+        # Extraer los valores de UGEL del resultado
+        ugels_list = []
+        for row in ugels_raw:
+            if isinstance(row, dict):  # Para MySQL (DictCursor)
+                ugel = row.get('ugel_origen')
+            else:  # Para SQLite (Row)
+                ugel = row['ugel_origen']
+                
+            if ugel and ugel not in ugels_list:
+                ugels_list.append(ugel)
+                
+        return ugels_list
+        
+    except Exception as e:
+        logger.error(f"Error al obtener UGELs disponibles: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
+    finally:
+        if conn:
+            conn.close()
+            logger.info("Conexión a BD (admin) cerrada.")
+
+# Endpoint para obtener estadísticas de respuesta_util para el gráfico
+@router.get("/admin/stats/respuesta_util_por_fecha", response_model=RespuestaUtilChartResponse, summary="Estadísticas de Utilidad de Respuesta por Fecha")
+async def obtener_stats_respuesta_util(
+    fecha_desde: Optional[str] = Query(None, description="Fecha desde (YYYY-MM-DD)"),
+    fecha_hasta: Optional[str] = Query(None, description="Fecha hasta (YYYY-MM-DD)")
+):
+    """
+    Obtiene la cuenta de cada valor en `respuesta_util` para un rango de fechas.
+    Diseñado para ser consumido por un gráfico de barras en el frontend.
+    Devuelve los datos agrupados listos para Chart.js.
+    """
+    conn = get_admin_db_connection()
+    if not conn:
+        logger.error("STATS_RESPUESTA_UTIL: Error al conectar a la BD.")
+        raise HTTPException(status_code=503, detail="No se pudo conectar a la base de datos para admin.")
+
+    try:
+        cursor = conn.cursor()
+        db_type_admin = os.getenv('DB_TYPE', 'sqlite')
+        logger.info(f"STATS_RESPUESTA_UTIL: Iniciando consulta. DB_TYPE: {db_type_admin}")
+
+        filtros_sql = []
+        params_sql = {} 
+        params_list_sql = []
+
+        if fecha_desde:
+            try:
+                fecha_desde_dt = datetime.datetime.strptime(fecha_desde, '%Y-%m-%d').strftime('%Y-%m-%d 00:00:00')
+                if db_type_admin == 'mysql':
+                    filtros_sql.append("timestamp >= %(fecha_desde)s")
+                    params_sql['fecha_desde'] = fecha_desde_dt
+                else: 
+                    filtros_sql.append("timestamp >= ?")
+                    params_list_sql.append(fecha_desde_dt)
+            except ValueError:
+                logger.warning(f"STATS_RESPUESTA_UTIL: Formato de fecha_desde inválido: {fecha_desde}")
+                raise HTTPException(status_code=400, detail="Formato de fecha_desde inválido. Usar YYYY-MM-DD.")
+
+        if fecha_hasta:
+            try:
+                fecha_hasta_dt = datetime.datetime.strptime(fecha_hasta, '%Y-%m-%d').strftime('%Y-%m-%d 23:59:59')
+                if db_type_admin == 'mysql':
+                    filtros_sql.append("timestamp <= %(fecha_hasta)s")
+                    params_sql['fecha_hasta'] = fecha_hasta_dt
+                else: 
+                    filtros_sql.append("timestamp <= ?")
+                    params_list_sql.append(fecha_hasta_dt)
+            except ValueError:
+                logger.warning(f"STATS_RESPUESTA_UTIL: Formato de fecha_hasta inválido: {fecha_hasta}")
+                raise HTTPException(status_code=400, detail="Formato de fecha_hasta inválido. Usar YYYY-MM-DD.")
+        
+        where_clause = ""
+        if filtros_sql:
+            where_clause = " WHERE " + " AND ".join(filtros_sql)
+
+        query_stats = f"""
+            SELECT 
+                COALESCE(LOWER(respuesta_util), 'sin clasificar') as categoria_utilidad,
+                COUNT(*) as cantidad
+            FROM consultas
+            {where_clause}
+            GROUP BY categoria_utilidad
+            ORDER BY cantidad DESC
+        """
+        # Se agrega LOWER() para unificar 'si', 'Si', 'SI', etc. y COALESCE para agrupar nulos.
+
+        logger.info(f"STATS_RESPUESTA_UTIL: Query: {query_stats}")
+        if db_type_admin == 'mysql':
+            logger.info(f"STATS_RESPUESTA_UTIL: Params (MySQL): {params_sql}")
+            cursor.execute(query_stats, params_sql)
+        else:
+            logger.info(f"STATS_RESPUESTA_UTIL: Params (SQLite): {tuple(params_list_sql)}")
+            cursor.execute(query_stats, tuple(params_list_sql))
+            
+        results = cursor.fetchall()
+
+        labels = []
+        values = []
+        if results:
+            for row in results:
+                # Asegurar que la etiqueta sea un string
+                label_from_db = str(row['categoria_utilidad'] if isinstance(row, dict) else row[0])
+                value_from_db = int(row['cantidad'] if isinstance(row, dict) else row[1])
+                labels.append(label_from_db)
+                values.append(value_from_db)
+        
+        logger.info(f"STATS_RESPUESTA_UTIL: Resultados para gráfico: Labels: {labels}, Values: {values}")
+        return RespuestaUtilChartResponse(labels=labels, values=values)
+
+    except HTTPException as http_exc: # Re-lanzar HTTPExceptions para que FastAPI las maneje
+        logger.error(f"STATS_RESPUESTA_UTIL: HTTPException: {http_exc.detail}")
+        raise http_exc
+    except Exception as e:
+        logger.error(f"STATS_RESPUESTA_UTIL: Error inesperado: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor al generar estadísticas de utilidad: {str(e)}")
+    finally:
+        if conn:
+            conn.close()
+            logger.info("STATS_RESPUESTA_UTIL: Conexión a BD cerrada.")
+
+# Endpoint para obtener estadísticas generales
+@router.get("/admin/estadisticas", response_model=EstadisticasResponse, summary="Obtener Estadísticas Generales")
+async def obtener_estadisticas(
+    fecha_desde: Optional[str] = Query(None, description="Fecha desde (YYYY-MM-DD)"),
+    fecha_hasta: Optional[str] = Query(None, description="Fecha hasta (YYYY-MM-DD)"),
+    ugel_origen: Optional[str] = Query(None, description="UGEL origen específica")
+):
+    """
+    Obtiene estadísticas basadas en los filtros aplicados
+    """
+    conn = get_admin_db_connection()
+    if not conn:
+        raise HTTPException(status_code=503, detail="No se pudo conectar a la base de datos para admin.")
+
+    try:
+        cursor = conn.cursor()
+        
+        # Construir condiciones de filtrado
+        filtros_sql = []
+        params_sql = {}  # Para MySQL
+        params_list_sql = []  # Para SQLite
+
+        db_type_admin = os.getenv('DB_TYPE', 'sqlite')
+
+        # Construir filtros
+        if fecha_desde:
+            try:
+                fecha_desde_dt = datetime.datetime.strptime(fecha_desde, '%Y-%m-%d').strftime('%Y-%m-%d 00:00:00')
+                if db_type_admin == 'mysql':
+                    filtros_sql.append("timestamp >= %(fecha_desde)s")
+                    params_sql['fecha_desde'] = fecha_desde_dt
+                else:  # sqlite
+                    filtros_sql.append("timestamp >= ?")
+                    params_list_sql.append(fecha_desde_dt)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Formato de fecha_desde inválido. Usar YYYY-MM-DD.")
+
+        if fecha_hasta:
+            try:
+                fecha_hasta_dt = datetime.datetime.strptime(fecha_hasta, '%Y-%m-%d').strftime('%Y-%m-%d 23:59:59')
+                if db_type_admin == 'mysql':
+                    filtros_sql.append("timestamp <= %(fecha_hasta)s")
+                    params_sql['fecha_hasta'] = fecha_hasta_dt
+                else:  # sqlite
+                    filtros_sql.append("timestamp <= ?")
+                    params_list_sql.append(fecha_hasta_dt)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Formato de fecha_hasta inválido. Usar YYYY-MM-DD.")
+                
+        if ugel_origen:
+            if db_type_admin == 'mysql':
+                filtros_sql.append("ugel_origen = %(ugel_origen)s")
+                params_sql['ugel_origen'] = ugel_origen
+            else:  # sqlite
+                filtros_sql.append("ugel_origen = ?")
+                params_list_sql.append(ugel_origen)
+                
+        # Crear cláusula WHERE si hay filtros
+        where_clause = ""
+        if filtros_sql:
+            where_clause = " WHERE " + " AND ".join(filtros_sql)
+        
+        # 1. Contar total de preguntas
+        query_total = f"SELECT COUNT(*) as total FROM consultas{where_clause}"
+        
+        if db_type_admin == 'mysql':
+            cursor.execute(query_total, params_sql)
+        else:
+            cursor.execute(query_total, tuple(params_list_sql))
+            
+        total_result = cursor.fetchone()
+        total_preguntas = total_result['total'] if isinstance(total_result, dict) else total_result[0]
+        
+        # 2. Sumar tokens
+        query_tokens = f"""
+            SELECT 
+                SUM(COALESCE(tokens_input, 0)) as total_input,
+                SUM(COALESCE(tokens_output, 0)) as total_output
+            FROM consultas
+            {where_clause}
+        """
+        
+        if db_type_admin == 'mysql':
+            cursor.execute(query_tokens, params_sql)
+        else:
+            cursor.execute(query_tokens, tuple(params_list_sql))
+            
+        tokens_result = cursor.fetchone()
+        
+        if isinstance(tokens_result, dict):
+            total_tokens_input = tokens_result['total_input'] or 0
+            total_tokens_output = tokens_result['total_output'] or 0
+        else:
+            total_tokens_input = tokens_result[0] or 0
+            total_tokens_output = tokens_result[1] or 0
+        
+        # 3. Estadísticas de utilidad
+        query_utilidad = f"""
+            SELECT 
+                respuesta_util,
+                COUNT(*) as cantidad
+            FROM consultas
+            {where_clause}
+            GROUP BY respuesta_util
+        """
+        
+        if db_type_admin == 'mysql':
+            cursor.execute(query_utilidad, params_sql)
+        else:
+            cursor.execute(query_utilidad, tuple(params_list_sql))
+            
+        utilidad_results = cursor.fetchall()
+        
+        # Inicializar contadores
+        utilidad_si = 0
+        utilidad_no = 0
+        utilidad_sin_clasificar = 0
+        
+        for row in utilidad_results:
+            if isinstance(row, dict):
+                util_val = row['respuesta_util']
+                cantidad = row['cantidad']
+            else:
+                util_val = row[0]
+                cantidad = row[1]
+                
+            if util_val == 'si':
+                utilidad_si = cantidad
+            elif util_val == 'no':
+                utilidad_no = cantidad
+            else:
+                utilidad_sin_clasificar += cantidad
+        
+        # 4. Estadísticas de respuestas vacías
+        query_vacia = f"""
+            SELECT 
+                respuesta_es_vacia,
+                COUNT(*) as cantidad
+            FROM consultas
+            {where_clause}
+            GROUP BY respuesta_es_vacia
+        """
+        
+        if db_type_admin == 'mysql':
+            cursor.execute(query_vacia, params_sql)
+        else:
+            cursor.execute(query_vacia, tuple(params_list_sql))
+            
+        vacia_results = cursor.fetchall()
+        
+        # Inicializar contadores
+        vacia_si = 0
+        vacia_no = 0
+        vacia_sin_clasificar = 0
+        
+        for row in vacia_results:
+            if isinstance(row, dict):
+                vacia_val = row['respuesta_es_vacia']
+                cantidad = row['cantidad']
+            else:
+                vacia_val = row[0]
+                cantidad = row[1]
+                
+            if vacia_val == 1:
+                vacia_si = cantidad
+            elif vacia_val == 0:
+                vacia_no = cantidad
+            else:
+                vacia_sin_clasificar += cantidad
+        
+        # 5. Preguntas por UGEL
+        query_ugel = f"""
+            SELECT 
+                COALESCE(ugel_origen, 'Sin UGEL') as ugel,
+                COUNT(*) as cantidad
+            FROM consultas
+            {where_clause}
+            GROUP BY ugel_origen
+            ORDER BY cantidad DESC
+        """
+        
+        if db_type_admin == 'mysql':
+            cursor.execute(query_ugel, params_sql)
+        else:
+            cursor.execute(query_ugel, tuple(params_list_sql))
+            
+        ugel_results = cursor.fetchall()
+        
+        ugel_data = []
+        for row in ugel_results:
+            if isinstance(row, dict):
+                ugel_nombre = row['ugel'] or 'Sin definir'
+                cantidad = row['cantidad']
+            else:
+                ugel_nombre = row[0] or 'Sin definir'
+                cantidad = row[1]
+                
+            ugel_data.append({
+                "ugel": ugel_nombre,
+                "cantidad": cantidad
+            })
+        
+        # Construir la respuesta final
+        respuesta = {
+            "total_preguntas": total_preguntas,
+            "total_tokens_input": total_tokens_input,
+            "total_tokens_output": total_tokens_output,
+            "utilidad": {
+                "si": utilidad_si,
+                "no": utilidad_no,
+                "sin_clasificar": utilidad_sin_clasificar
+            },
+            "respuesta_vacia": {
+                "si": vacia_si,
+                "no": vacia_no,
+                "sin_clasificar": vacia_sin_clasificar
+            },
+            "ugel_preguntas": ugel_data
+        }
+        
+        return respuesta
+        
+    except Exception as e:
+        logger.error(f"Error al obtener estadísticas: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
+    finally:
+        if conn:
+            conn.close()
+            logger.info("Conexión a BD (admin) cerrada.")
+
+# Modelo Pydantic para la respuesta de estadísticas diarias
+class EstadisticasDiariasResponse(BaseModel):
+    fecha: str
+    cantidad: int
+
+@router.get("/admin/stats/registros_por_dia", response_model=List[EstadisticasDiariasResponse])
+async def obtener_stats_diarias(
+    fecha_desde: Optional[str] = Query(None, description="Fecha desde (YYYY-MM-DD)"),
+    fecha_hasta: Optional[str] = Query(None, description="Fecha hasta (YYYY-MM-DD)")
+):
+    """
+    Obtiene la cantidad de registros por día para un rango de fechas.
+    """
+    conn = get_admin_db_connection()
+    if not conn:
+        raise HTTPException(status_code=503, detail="No se pudo conectar a la base de datos para admin.")
+
+    try:
+        cursor = conn.cursor()
+        db_type = os.getenv('DB_TYPE', 'sqlite')
+        
+        # Construir filtros
+        filtros_sql = []
+        params_sql = {}  # Para MySQL
+        params_list_sql = []  # Para SQLite
+
+        if fecha_desde:
+            try:
+                fecha_desde_dt = datetime.datetime.strptime(fecha_desde, '%Y-%m-%d').strftime('%Y-%m-%d 00:00:00')
+                if db_type == 'mysql':
+                    filtros_sql.append("timestamp >= %(fecha_desde)s")
+                    params_sql['fecha_desde'] = fecha_desde_dt
+                else:  # sqlite
+                    filtros_sql.append("timestamp >= ?")
+                    params_list_sql.append(fecha_desde_dt)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Formato de fecha_desde inválido. Usar YYYY-MM-DD.")
+
+        if fecha_hasta:
+            try:
+                fecha_hasta_dt = datetime.datetime.strptime(fecha_hasta, '%Y-%m-%d').strftime('%Y-%m-%d 23:59:59')
+                if db_type == 'mysql':
+                    filtros_sql.append("timestamp <= %(fecha_hasta)s")
+                    params_sql['fecha_hasta'] = fecha_hasta_dt
+                else:  # sqlite
+                    filtros_sql.append("timestamp <= ?")
+                    params_list_sql.append(fecha_hasta_dt)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Formato de fecha_hasta inválido. Usar YYYY-MM-DD.")
+
+        # Crear cláusula WHERE si hay filtros
+        where_clause = ""
+        if filtros_sql:
+            where_clause = " WHERE " + " AND ".join(filtros_sql)
+
+        # Query adaptada según el tipo de base de datos
+        if db_type == 'mysql':
+            query = f"""
+                SELECT DATE(timestamp) as fecha, COUNT(*) as cantidad
+                FROM consultas
+                {where_clause}
+                GROUP BY DATE(timestamp)
+                ORDER BY fecha ASC
+            """
+        else:  # sqlite
+            query = f"""
+                SELECT date(timestamp) as fecha, COUNT(*) as cantidad
+                FROM consultas
+                {where_clause}
+                GROUP BY date(timestamp)
+                ORDER BY fecha ASC
+            """
+
+        if db_type == 'mysql':
+            cursor.execute(query, params_sql)
+        else:
+            cursor.execute(query, tuple(params_list_sql))
+
+        resultados = cursor.fetchall()
+        
+        # Procesar resultados
+        stats_diarias = []
+        for row in resultados:
+            if isinstance(row, dict):  # MySQL
+                fecha = row['fecha']
+                cantidad = row['cantidad']
+            else:  # SQLite
+                fecha = row[0]
+                cantidad = row[1]
+            
+            stats_diarias.append({
+                "fecha": fecha,
+                "cantidad": cantidad
+            })
+
+        return stats_diarias
+
+    except Exception as e:
+        logger.error(f"Error al obtener estadísticas diarias: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()

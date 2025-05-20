@@ -7,34 +7,42 @@ Script para buscar fragmentos en la base de datos vectorial Qdrant.
 
 import os
 import sys
-import configparser
 from datetime import datetime
 from langchain_openai import OpenAIEmbeddings
 from qdrant_client import QdrantClient
-from langchain_qdrant import Qdrant
+from langchain_qdrant import Qdrant # LangChainDeprecationWarning: Qdrant -> QdrantVectorStore
+from dotenv import load_dotenv
 
-# Configuraciones por defecto
-DEFAULT_QDRANT_URL = "http://localhost:6333"
-DEFAULT_COLLECTION = "fragment_store"
-DEFAULT_RESULTS = 5
+# --- Carga de Configuración a Nivel de Módulo ---
+_DOTENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
 
-def buscar_config_ini():
-    """Busca el archivo config.ini en diferentes ubicaciones."""
-    # Lista de posibles ubicaciones del archivo config.ini
-    posibles_rutas = [
-        'config.ini',                           # En el directorio actual
-        '../config.ini',                        # En el directorio padre
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.ini'),  # En la carpeta del script
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config.ini')  # En la carpeta padre del script
-    ]
-    
-    for ruta in posibles_rutas:
-        if os.path.exists(ruta):
-            print(f"Archivo config.ini encontrado en: {ruta}")
-            return ruta
-    
-    print("ADVERTENCIA: No se encontró el archivo config.ini")
-    return None
+if os.path.exists(_DOTENV_PATH):
+    # Cargar .env, pero no sobrescribir variables de entorno existentes
+    load_dotenv(dotenv_path=_DOTENV_PATH, override=False)
+    print(f"Cargando configuracion desde: {_DOTENV_PATH}")
+    # Si OPENAI_API_KEY ya existe en el entorno, python-dotenv (con override=False) no la cambiará.
+    # Si no existe, tomará el valor del .env.
+else:
+    # Si .env no está en la ruta esperada, intenta cargar (puede que encuentre uno en CWD o nada)
+    load_dotenv(override=False)
+    print(f"Archivo .env no encontrado en {_DOTENV_PATH}, intentando carga estándar.")
+
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+QDRANT_URL = os.getenv('QDRANT_URL', 'http://localhost:6333')
+COLLECTION_NAME = os.getenv('COLLECTION_NAME_FRAGMENTO', 'fragment_store')
+DEFAULT_RESULTS = int(os.getenv('MAX_RESULTS', '5'))
+
+if not OPENAI_API_KEY:
+    print("CRÍTICO: La variable de entorno OPENAI_API_KEY no está configurada.")
+    print("Por favor, asegúrate de que esté definida en tu archivo .env o en tu entorno.")
+    # sys.exit(1) # Podrías salir aquí si es crítico
+elif OPENAI_API_KEY.startswith("sk-proj-"):
+    print("ADVERTENCIA: La OPENAI_API_KEY configurada comienza con 'sk-proj-'.")
+    print("Este tipo de clave es para Proyectos de OpenAI y usualmente no funciona para llamadas directas a la API de embeddings.")
+    print("Por favor, asegúrate de usar una Clave Secreta (Secret Key) que comience con 'sk-'.")
+    print("Puedes obtener una nueva Clave Secreta en: https://platform.openai.com/account/api-keys")
+
+# --- Fin de Carga de Configuración ---
 
 def guardar_resultados(resultados, pregunta, ruta_archivo):
     """Guarda los resultados de la búsqueda en un archivo."""
@@ -63,88 +71,69 @@ def guardar_resultados(resultados, pregunta, ruta_archivo):
 def main():
     print("\n===== CONSULTA A LA BASE DE DATOS VECTORIAL QDRANT =====\n")
     
-    # Buscar y cargar configuración
-    ruta_config = buscar_config_ini()
-    if not ruta_config:
-        print("Error: No se pudo encontrar el archivo config.ini")
+    if not OPENAI_API_KEY:
+        # Esta verificación ya se hace arriba, pero es bueno tenerla antes de usar la clave.
+        print("Error: OPENAI_API_KEY no está disponible. Revisa la configuración.")
         return
     
-    config = configparser.ConfigParser()
-    config.read(ruta_config)
+    print(f"API key de OpenAI (parcialmente oculta): {OPENAI_API_KEY[:5]}...{OPENAI_API_KEY[-4:] if len(OPENAI_API_KEY) > 9 else ''}")
+    print(f"URL de Qdrant: {QDRANT_URL}")
+    print(f"Colección a consultar: {COLLECTION_NAME}")
     
-    # Obtener API key de OpenAI
-    openai_api_key = config['DEFAULT'].get('openai_api_key')
-    if not openai_api_key:
-        print("Error: No se encontró la API key de OpenAI en config.ini")
-        return
-    
-    print(f"API key de OpenAI encontrada: {openai_api_key[:5]}...")
-    
-    # Configuración de Qdrant
-    try:
-        qdrant_url = config['SERVICIOS_SIMAP_Q'].get('qdrant_url', DEFAULT_QDRANT_URL)
-        collection_name = config['SERVICIOS_SIMAP_Q'].get('collection_name_fragmento', DEFAULT_COLLECTION)
-    except:
-        qdrant_url = DEFAULT_QDRANT_URL
-        collection_name = DEFAULT_COLLECTION
-    
-    print(f"URL de Qdrant: {qdrant_url}")
-    print(f"Colección a consultar: {collection_name}")
-    
-    # Preguntar si se desea guardar los resultados en un archivo
     guardar_a_archivo = input("¿Desea guardar los resultados en un archivo? (s/n): ").lower() == 's'
     ruta_archivo = None
     
     if guardar_a_archivo:
-        ruta_archivo = input("Ingrese la ruta del archivo (o Enter para usar 'resultados_qdrant.txt'): ")
-        if not ruta_archivo.strip():
-            ruta_archivo = "resultados_qdrant.txt"
+        ruta_archivo_input = input("Ingrese la ruta del archivo (o Enter para usar 'resultados_qdrant.txt'): ")
+        ruta_archivo = ruta_archivo_input.strip() if ruta_archivo_input.strip() else "resultados_qdrant.txt"
         print(f"Los resultados se guardarán en: {ruta_archivo}")
     
-    # Conectar a Qdrant
+    current_collection_name = COLLECTION_NAME # Para permitir cambio si la colección no existe
     try:
-        client = QdrantClient(url=qdrant_url)
-        print("Conexión a Qdrant establecida")
+        client = QdrantClient(url=QDRANT_URL)
+        print("Conexión a Qdrant establecida.")
         
-        # Verificar colecciones disponibles
-        collections = client.get_collections().collections
-        collection_names = [c.name for c in collections]
+        collections_response = client.get_collections()
+        available_collections = [c.name for c in collections_response.collections]
+        print(f"Colecciones disponibles: {available_collections}")
         
-        print(f"Colecciones disponibles: {collection_names}")
-        
-        if collection_name not in collection_names:
-            print(f"Error: La colección '{collection_name}' no existe.")
-            
-            # Preguntar si quiere usar otra colección disponible
-            if collection_names:
-                use_alternative = input(f"¿Desea usar la colección '{collection_names[0]}' en su lugar? (s/n): ")
-                if use_alternative.lower() == 's':
-                    collection_name = collection_names[0]
-                    print(f"Usando colección alternativa: {collection_name}")
+        if current_collection_name not in available_collections:
+            print(f"Error: La colección '{current_collection_name}' no existe.")
+            if available_collections:
+                use_alternative = input(f"¿Desea usar la colección '{available_collections[0]}' en su lugar? (s/n): ").lower()
+                if use_alternative == 's':
+                    current_collection_name = available_collections[0]
+                    print(f"Usando colección alternativa: {current_collection_name}")
                 else:
+                    print("Operación cancelada por el usuario.")
                     return
             else:
-                print("No hay colecciones disponibles.")
+                print("No hay colecciones disponibles en Qdrant.")
                 return
     except Exception as e:
-        print(f"Error al conectar con Qdrant: {str(e)}")
+        print(f"Error al conectar con Qdrant o verificar colección: {str(e)}")
         return
     
-    # Inicializar embeddings de OpenAI
-    embeddings = OpenAIEmbeddings(api_key=openai_api_key)
-    
-    # Inicializar Qdrant con LangChain
-    vector_store = Qdrant(
-        client=client,
-        collection_name=collection_name,
-        embeddings=embeddings
-    )
+    try:
+        embeddings = OpenAIEmbeddings(api_key=OPENAI_API_KEY) # Aquí se usa la OPENAI_API_KEY
+    except Exception as e:
+        print(f"Error al inicializar OpenAIEmbeddings: {str(e)}")
+        print("Verifica que la OPENAI_API_KEY sea correcta (debe ser una Clave Secreta sk-...) y que tengas conexión a internet.")
+        return
+
+    try:
+        vector_store = Qdrant( # Esta clase está deprecada
+            client=client,
+            collection_name=current_collection_name,
+            embeddings=embeddings
+        )
+    except Exception as e:
+        print(f"Error al inicializar Qdrant (vector_store): {str(e)}")
+        return
     
     print("\nTodo listo para realizar consultas.")
     
-    # Bucle de consulta
     while True:
-        # Solicitar pregunta al usuario
         print("\n" + "-"*50)
         pregunta = input("\nIngrese su pregunta (o 'salir' para terminar): ")
         
@@ -156,15 +145,16 @@ def main():
             print("Pregunta vacía. Intente de nuevo.")
             continue
         
-        # Solicitar número de resultados
         try:
             num_resultados_input = input(f"Número de resultados a mostrar (Enter para usar {DEFAULT_RESULTS}): ")
             num_resultados = int(num_resultados_input) if num_resultados_input.strip() else DEFAULT_RESULTS
-        except:
-            print(f"Valor no válido. Usando {DEFAULT_RESULTS} resultados.")
+            if num_resultados <= 0:
+                print("El número de resultados debe ser positivo. Usando valor por defecto.")
+                num_resultados = DEFAULT_RESULTS
+        except ValueError:
+            print(f"Valor no válido para número de resultados. Usando {DEFAULT_RESULTS} resultados.")
             num_resultados = DEFAULT_RESULTS
         
-        # Realizar búsqueda
         print(f"\nBuscando: '{pregunta}'")
         print(f"Recuperando hasta {num_resultados} resultados...\n")
         
@@ -174,22 +164,17 @@ def main():
                 k=num_resultados
             )
             
-            # Mostrar resultados
             if resultados:
                 print(f"\n===== Se encontraron {len(resultados)} fragmentos relevantes =====\n")
-                
                 for i, (doc, score) in enumerate(resultados, 1):
                     print(f"\n----- Fragmento #{i} (Score: {score:.4f}) -----")
                     print(f"Contenido:\n{doc.page_content}")
-                    
                     if doc.metadata:
                         print("\nMetadatos:")
                         for key, value in doc.metadata.items():
                             print(f"  - {key}: {value}")
-                    
                     print("-" * 70)
                 
-                # Guardar resultados si se solicitó
                 if guardar_a_archivo and ruta_archivo:
                     guardar_resultados(resultados, pregunta, ruta_archivo)
             else:
@@ -201,9 +186,9 @@ def main():
                         archivo.write(f"Pregunta: {pregunta}\n")
                         archivo.write("No se encontraron fragmentos relevantes para esta pregunta.\n")
                         archivo.write(f"{'='*50}\n\n")
-                
         except Exception as e:
             print(f"Error al realizar la búsqueda: {str(e)}")
+            print("Detalles del error:")
             import traceback
             traceback.print_exc()
 
@@ -213,7 +198,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n\nOperación cancelada por el usuario.")
     except Exception as e:
-        print(f"\nError inesperado: {str(e)}")
+        print(f"\nError inesperado en la ejecución: {str(e)}")
         import traceback
         traceback.print_exc()
     finally:

@@ -60,7 +60,7 @@ def persistir_consulta(
         "pregunta_usuario": pregunta_usuario,
         "respuesta_asistente": respuesta_asistente,
         "respuesta_es_vacia": len(respuesta_asistente or "") < 150,
-        "respuesta_util": None,
+        "respuesta_util": "nada", # Valor inicial para todas las consultas
         "id_prompt_usado": 1,
         "tokens_input": tokens_input,
         "tokens_output": tokens_output,

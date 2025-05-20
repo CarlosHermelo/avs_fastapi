@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Consultas del Asistente - Admin</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f6f8; }
+        .container { max-width: 1300px; margin: auto; background-color: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; text-align: center; margin-bottom: 25px; }
+        .filters { margin-bottom: 25px; padding: 20px; border: 1px solid #dfe6e9; border-radius: 6px; background-color: #f9fafb;}
+        .filters label { margin-right: 8px; font-weight: bold; color: #34495e;}
+        .filters input[type="date"], .filters select { padding: 10px; margin-right: 15px; border: 1px solid #bdc3c7; border-radius: 4px; font-size: 14px; }
+        .filters button { padding: 10px 18px; background-color: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 15px; transition: background-color 0.3s ease; }
+        .filters button:hover { background-color: #2980b9; }
+        
+        .table-container {
+            max-height: 600px; /* Altura máxima antes de mostrar scroll */
+            overflow-y: auto; /* Scroll vertical */
+            border: 1px solid #dfe6e9;
+            border-radius: 6px;
+            margin-top: 20px;
+        }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #dfe6e9; padding: 12px; text-align: left; font-size: 14px;}
+        th { background-color: #e9ecef; color: #495057; position: sticky; top: 0; z-index: 1;} /* Para que los encabezados se queden fijos al hacer scroll */
+        tr:nth-child(even) { background-color: #f8f9fa; }
+        tr:hover { background-color: #e2e6ea; }
+        .action-btn { padding: 6px 12px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; font-size: 13px; transition: background-color 0.3s ease; }
+        .action-btn:hover { background-color: #218838; }
+        .char-limit { max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; } /* Cursor help para indicar que hay más texto */
+        .loading-spinner { display: none; text-align: center; padding: 20px; }
+        .loading-spinner::after {
+            content: ""; display: inline-block; width: 30px; height: 30px;
+            border: 4px solid rgba(52, 152, 219, 0.2); border-radius: 50%;
+            border-top-color: #3498db; animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .error-message { color: #e74c3c; font-weight: bold; margin-top: 15px; text-align: center; }
+        .no-results { text-align: center; padding: 20px; font-style: italic; color: #7f8c8d; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Analisis de Respuestas del Asistente Virtual SIMAP</h1>
+
+        <div class="filters">
+            <label for="fecha_desde">Fecha Desde:</label>
+            <input type="date" id="fecha_desde" name="fecha_desde">
+
+            <label for="fecha_hasta">Fecha Hasta:</label>
+            <input type="date" id="fecha_hasta" name="fecha_hasta">
+
+            <label for="respuesta_vacia">Sin datos:</label>
+            <select id="respuesta_vacia" name="respuesta_vacia">
+                <option value="">Todos</option>
+                <option value="1">Sí</option>
+                <option value="0">No</option>
+            </select>
+
+            <label for="respuesta_util">Utilidad:</label>
+            <select id="respuesta_util" name="respuesta_util">
+                <option value="">Todos</option>
+                <option value="si">Sí</option>
+                <option value="no">No</option>
+                <option value="nada">Sin feedback</option>
+            </select>
+
+            <button onclick="aplicarFiltros()">Filtrar</button>
+        </div>
+
+        <div id="loadingSpinner" class="loading-spinner">Cargando datos...</div>
+        <div id="errorMessage" class="error-message" style="display:none;"></div>
+
+        <div class="table-container">
+            <table id="tablaConsultas">
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>ID Usuario</th>
+                        <th>UGEL Origen</th>
+                        <th>Pregunta (resumen)</th>
+                        <th>Respuesta (resumen)</th>
+                        <th>Sin datos</th>
+                        <th>Utilidad</th>
+                        <th>Acción</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Los datos se cargarán aquí -->
+                </tbody>
+            </table>
+        </div>
+         <div id="noResults" class="no-results" style="display:none;">No se encontraron registros con los filtros aplicados.</div>
+    </div>
+
+    <script>
+        // Configuración del endpoint - Usar URL absoluta en lugar de relativa
+        const SERVER_URL = 'http://localhost:8000';  // Siempre usar localhost:8000
+
+        const API_ENDPOINT = `${SERVER_URL}/api/admin/consultas_filtradas`;
+        const API_ESTADISTICAS = `${SERVER_URL}/api/admin/estadisticas`;
+        const API_UGELS = `${SERVER_URL}/api/admin/ugels_disponibles`;
+
+        async function aplicarFiltros() {
+            const fechaDesde = document.getElementById('fecha_desde').value;
+            const fechaHasta = document.getElementById('fecha_hasta').value;
+            const respuestaVacia = document.getElementById('respuesta_vacia').value;
+            const respuestaUtil = document.getElementById('respuesta_util').value;
+
+            const spinner = document.getElementById('loadingSpinner');
+            const errorMessageDiv = document.getElementById('errorMessage');
+            const noResultsDiv = document.getElementById('noResults');
+            const tablaBody = document.getElementById('tablaConsultas').getElementsByTagName('tbody')[0];
+
+            spinner.style.display = 'block';
+            errorMessageDiv.style.display = 'none';
+            noResultsDiv.style.display = 'none';
+            tablaBody.innerHTML = ''; // Limpiar tabla anterior
+
+            let queryParams = new URLSearchParams();
+            if (fechaDesde) queryParams.append('fecha_desde', fechaDesde);
+            if (fechaHasta) queryParams.append('fecha_hasta', fechaHasta);
+            if (respuestaVacia !== "") queryParams.append('respuesta_es_vacia', respuestaVacia);
+            if (respuestaUtil !== "") queryParams.append('respuesta_util', respuestaUtil);
+
+            const apiUrl = `${API_ENDPOINT}?${queryParams.toString()}`;
+            console.log('DEBUG - URL de API a consultar:', apiUrl);
+
+            try {
+                console.log('DEBUG - Iniciando fetch a:', apiUrl);
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    },
+                });
+                console.log('DEBUG - Respuesta recibida, status:', response.status);
+                
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({detail: "Error desconocido del servidor."}));
+                    console.error('DEBUG - Error de respuesta:', response.status, errorData);
+                    throw new Error(`Error ${response.status}: ${errorData.detail || response.statusText}`);
+                }
+                
+                console.log('DEBUG - Procesando respuesta JSON');
+                const data = await response.json();
+                console.log('DEBUG - Datos recibidos:', data);
+
+                if (data.error) { // Error devuelto por la lógica del endpoint
+                    throw new Error(data.error);
+                }
+                
+                if (data.length === 0) {
+                    noResultsDiv.style.display = 'block';
+                } else {
+                    data.forEach(consulta => {
+                        const row = tablaBody.insertRow();
+                        row.insertCell().textContent = new Date(consulta.timestamp).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'medium'});
+                        row.insertCell().textContent = consulta.id_usuario;
+                        row.insertCell().textContent = consulta.ugel_origen;
+                        
+                        const preguntaCell = row.insertCell();
+                        preguntaCell.textContent = consulta.pregunta_usuario_truncada;
+                        preguntaCell.title = consulta.pregunta_usuario_completa;
+                        preguntaCell.classList.add('char-limit');
+
+                        const respuestaCell = row.insertCell();
+                        respuestaCell.textContent = consulta.respuesta_asistente_truncada;
+                        respuestaCell.title = consulta.respuesta_asistente_completa;
+                        respuestaCell.classList.add('char-limit');
+
+                        row.insertCell().textContent = consulta.respuesta_es_vacia ? 'Sí' : 'No';
+                        
+                        // Mostrar el valor correcto de respuesta_util según el tipo de string
+                        const utilidadCell = row.insertCell();
+                        if (consulta.respuesta_util === "si") {
+                            utilidadCell.textContent = 'Sí';
+                        } else if (consulta.respuesta_util === "no") {
+                            utilidadCell.textContent = 'No';
+                        } else if (consulta.respuesta_util === "nada") {
+                            utilidadCell.textContent = 'Sin feedback';
+                        } else {
+                            utilidadCell.textContent = consulta.respuesta_util || 'Sin definir';
+                        }
+                        
+                        const actionCell = row.insertCell();
+                        const verButton = document.createElement('button');
+                        verButton.textContent = 'Ver';
+                        verButton.classList.add('action-btn');
+                        verButton.onclick = function() { verDetalle(consulta.id_consulta, consulta); };
+                        actionCell.appendChild(verButton);
+                    });
+                }
+            } catch (error) {
+                console.error('DEBUG - Error en fetch:', error);
+                errorMessageDiv.textContent = "Error al cargar datos: " + error.message;
+                errorMessageDiv.style.display = 'block';
+            } finally {
+                spinner.style.display = 'none';
+            }
+        }
+
+        function verDetalle(idConsulta, consultaCompleta) {
+            // TODO: Implementar la lógica para mostrar más detalles.
+            // Por ejemplo, abrir un modal con toda la info, incluyendo pregunta_usuario_completa y respuesta_asistente_completa.
+            console.log('ID de consulta:', idConsulta);
+            console.log('Datos completos de la consulta:', consultaCompleta);
+            alert(`Acción "Ver" para la consulta ID: ${idConsulta}.\n\nPregunta: ${consultaCompleta.pregunta_usuario_completa}\n\nRespuesta: ${consultaCompleta.respuesta_asistente_completa}\n\n (Implementar modal o vista detallada)`);
+        }
+
+        // Cargar datos al iniciar la página para probar la funcionalidad 
+        window.onload = () => {
+            console.log('DEBUG - Página cargada, preparando para cargar datos automáticamente');
+            // Agregamos un pequeño delay para asegurarnos que la página haya terminado de cargar
+            setTimeout(aplicarFiltros, 500);
+        };
+    </script>
+</body>
+</html> 

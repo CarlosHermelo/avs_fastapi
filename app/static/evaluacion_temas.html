@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Análisis de Preguntas Frecuentes y Necesidades de Capacitación – SIMAP</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 20px; 
+            background-color: #f4f6f8; 
+        }
+        .container { 
+            max-width: 1200px;
+            margin: auto; 
+            background-color: #fff; 
+            padding: 25px; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1); 
+        }
+        h1 { 
+            color: #2c3e50; 
+            text-align: center; 
+            margin-bottom: 25px; 
+        }
+        .filters { 
+            margin-bottom: 25px; 
+            padding: 20px; 
+            border: 1px solid #dfe6e9; 
+            border-radius: 6px; 
+            background-color: #f9fafb;
+        }
+        .filters label { 
+            margin-right: 8px; 
+            font-weight: bold; 
+            color: #34495e;
+        }
+        .filters input[type="date"] { 
+            padding: 10px; 
+            margin-right: 15px; 
+            border: 1px solid #bdc3c7; 
+            border-radius: 4px; 
+            font-size: 14px; 
+        }
+        .filters button { 
+            padding: 10px 18px; 
+            background-color: #3498db; 
+            color: white; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            font-size: 15px; 
+            transition: background-color 0.3s ease; 
+        }
+        .filters button:hover { 
+            background-color: #2980b9; 
+        }
+        .loading-spinner { 
+            display: none; 
+            text-align: center; 
+            padding: 20px; 
+        }
+        .loading-spinner::after {
+            content: ""; 
+            display: inline-block; 
+            width: 30px; 
+            height: 30px;
+            border: 4px solid rgba(52, 152, 219, 0.2); 
+            border-radius: 50%;
+            border-top-color: #3498db; 
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin { 
+            to { transform: rotate(360deg); } 
+        }
+        .error-message { 
+            color: #e74c3c; 
+            font-weight: bold; 
+            margin-top: 15px; 
+            text-align: center; 
+        }
+        .tema-section {
+            margin: 20px 0;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #3498db;
+        }
+        .tema-section h2 {
+            color: #2c3e50;
+            margin-top: 0;
+        }
+        .tema-section h3 {
+            color: #34495e;
+            margin-top: 15px;
+        }
+        .tema-section ul {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+        .tema-section li {
+            margin: 5px 0;
+            color: #2c3e50;
+        }
+        .conclusion-section {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: #e8f4f8;
+            border-radius: 8px;
+        }
+        .conclusion-section h2 {
+            color: #2c3e50;
+            margin-top: 0;
+        }
+        .conclusion-section ul {
+            margin: 10px 0;
+            padding-left: 20px;
+            color: #34495e;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Evaluación de Preguntas Frecuentes y Necesidades de Capacitación – SIMAP</h1>
+
+        <div class="filters">
+            <label for="fecha_desde">Fecha Desde:</label>
+            <input type="date" id="fecha_desde" name="fecha_desde">
+
+            <label for="fecha_hasta">Fecha Hasta:</label>
+            <input type="date" id="fecha_hasta" name="fecha_hasta">
+
+            <button onclick="aplicarFiltros()">Filtrar</button>
+        </div>
+
+        <div id="loadingSpinner" class="loading-spinner"></div>
+        <div id="errorMessage" class="error-message" style="display:none;"></div>
+        
+        <div id="contenidoTemas">
+            <!-- Sección 1: Afiliación y credencial -->
+            <div class="tema-section">
+                <h2>1. Afiliación y credencial</h2>
+                <h3>Temas abordados:</h3>
+                <ul>
+                    <li>Tipos de afiliación (común, ART, por hijo, con otra obra social).</li>
+                    <li>Requisitos y procesos de afiliación.</li>
+                    <li>Renovación de credencial provisoria.</li>
+                </ul>
+                <h3>Fortaleza a trabajar:</h3>
+                <ul>
+                    <li>Capacitar sobre condiciones de afiliación.</li>
+                    <li>Aclarar pasos concretos para cada tipo de alta o renovación.</li>
+                    <li>Informar criterios sobre compatibilidad con otras coberturas.</li>
+                </ul>
+            </div>
+
+            <!-- Sección 2: Atención médica y prescripción -->
+            <div class="tema-section">
+                <h2>2. Atención médica y prescripción</h2>
+                <h3>Temas abordados:</h3>
+                <ul>
+                    <li>Qué puede prescribir el médico de cabecera (presurometría, TAC, laboratorio).</li>
+                    <li>Qué hacer si el médico no puede emitir OME.</li>
+                    <li>Rol del afiliado luego de la emisión de una OME.</li>
+                </ul>
+                <h3>Fortaleza a trabajar:</h3>
+                <ul>
+                    <li>Claridad sobre los límites de prescripción del médico de cabecera.</li>
+                    <li>Procesos ante derivaciones u OME denegadas.</li>
+                    <li>Obligaciones posteriores del afiliado.</li>
+                </ul>
+            </div>
+
+            <!-- Sección 3: Medicamentos -->
+            <div class="tema-section">
+                <h2>3. Medicamentos</h2>
+                <h3>Temas abordados:</h3>
+                <ul>
+                    <li>Acceso gratuito a medicamentos.</li>
+                    <li>Requisitos formales.</li>
+                    <li>Condiciones excluyentes (ej. tener vehículo).</li>
+                </ul>
+                <h3>Fortaleza a trabajar:</h3>
+                <ul>
+                    <li>Criterios de gratuidad (según Resolución 337/20).</li>
+                    <li>Documentación requerida y casos frecuentes de rechazo.</li>
+                    <li>Mitos y realidades sobre exclusiones (como tener auto).</li>
+                </ul>
+            </div>
+
+            <!-- Sección 4: Elementos y ayudas técnicas -->
+            <div class="tema-section">
+                <h2>4. Elementos y ayudas técnicas</h2>
+                <h3>Temas abordados:</h3>
+                <ul>
+                    <li>Solicitud de bastón, palo, bolsas para ostomía.</li>
+                    <li>Rol de la OME y paso siguiente.</li>
+                    <li>Acceso a pañales (en geriátricos, veteranos).</li>
+                </ul>
+                <h3>Fortaleza a trabajar:</h3>
+                <ul>
+                    <li>Procedimientos y documentación para elementos.</li>
+                    <li>Diferencias entre elementos con y sin receta/OME.</li>
+                    <li>Casos especiales (veteranos, institucionalizados).</li>
+                </ul>
+            </div>
+
+            <!-- Sección 5: Traslados y movilidad -->
+            <div class="tema-section">
+                <h2>5. Traslados y movilidad</h2>
+                <h3>Temas abordados:</h3>
+                <ul>
+                    <li>Traslado programado (provincia de Salta).</li>
+                    <li>Emergencias en viaje.</li>
+                    <li>Trámites por movilidad (oxígeno en otra provincia).</li>
+                </ul>
+                <h3>Fortaleza a trabajar:</h3>
+                <ul>
+                    <li>Normativa y pasos para solicitar traslado según jurisdicción.</li>
+                    <li>Números de emergencia y su uso.</li>
+                    <li>Coordinación de oxígeno fuera de domicilio habitual.</li>
+                </ul>
+            </div>
+
+            <!-- Sección 6: Turnos en hospitales propios -->
+            <div class="tema-section">
+                <h2>6. Turnos en hospitales propios</h2>
+                <h3>Temas abordados:</h3>
+                <ul>
+                    <li>Cómo obtener un turno.</li>
+                    <li>A dónde llamar.</li>
+                </ul>
+                <h3>Fortaleza a trabajar:</h3>
+                <ul>
+                    <li>Listado de canales por UGL/hospital.</li>
+                    <li>Tipos de turnos (presencial, teléfono, web).</li>
+                    <li>Diferencias con prestadores privados.</li>
+                </ul>
+            </div>
+
+            <!-- Sección 7: Reintegros -->
+            <div class="tema-section">
+                <h2>7. Reintegros</h2>
+                <h3>Temas abordados:</h3>
+                <ul>
+                    <li>Reintegro por anteojos.</li>
+                </ul>
+                <h3>Fortaleza a trabajar:</h3>
+                <ul>
+                    <li>Procedimiento completo: documentación, plazos, dónde se gestiona.</li>
+                    <li>Qué reintegros cubre y cuáles no.</li>
+                </ul>
+            </div>
+
+            <!-- Sección 8: Definiciones y conceptos básicos -->
+            <div class="tema-section">
+                <h2>8. Definiciones y conceptos básicos</h2>
+                <h3>Temas abordados:</h3>
+                <ul>
+                    <li>Qué es una Orden de Prestación (OP).</li>
+                </ul>
+                <h3>Fortaleza a trabajar:</h3>
+                <ul>
+                    <li>Glosario básico de términos SIMAP para agentes.</li>
+                    <li>Diferencia entre OP, OME, receta, etc.</li>
+                </ul>
+            </div>
+
+            <!-- Sección 9: Sepelio -->
+            <div class="tema-section">
+                <h2>9. Sepelio (tema a corregir)</h2>
+                <h3>Tema erróneo:</h3>
+                <ul>
+                    <li>Se consulta por cobertura que no brinda PAMI.</li>
+                </ul>
+                <h3>Fortaleza a trabajar:</h3>
+                <ul>
+                    <li>Capacitar para identificar y desmentir mitos o preguntas erróneas comunes.</li>
+                </ul>
+            </div>
+
+            <!-- Conclusión -->
+            <div class="conclusion-section">
+                <h2>Conclusión</h2>
+                <p>Las preguntas reflejan una alta demanda de conocimiento en:</p>
+                <ul>
+                    <li>Procesos administrativos básicos (afiliación, credencial, turnos).</li>
+                    <li>Acceso a beneficios concretos (medicamentos, elementos, traslados).</li>
+                    <li>Acciones post receta u orden médica.</li>
+                    <li>Conceptos operativos clave (OME, OP, reintegros).</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuración del endpoint
+        const SERVER_URL = 'http://localhost:8000';
+
+        async function aplicarFiltros() {
+            const fechaDesde = document.getElementById('fecha_desde').value;
+            const fechaHasta = document.getElementById('fecha_hasta').value;
+
+            const spinner = document.getElementById('loadingSpinner');
+            const errorMessageDiv = document.getElementById('errorMessage');
+
+            spinner.style.display = 'block';
+            errorMessageDiv.style.display = 'none';
+
+            // Simular un tiempo de carga para mostrar que los filtros funcionan
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // Aquí podrías agregar lógica adicional para filtrar o modificar el contenido
+            // según las fechas seleccionadas si es necesario
+
+            spinner.style.display = 'none';
+        }
+    </script>
+</body>
+</html> 

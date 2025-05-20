@@ -173,23 +173,22 @@
     </div>
 
     <script>
+        // Variable global para almacenar el id_consulta actual
+        let currentConsultaId = null; 
+
         document.getElementById('questionForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
-            // Obtener valores del formulario
             const question = document.getElementById('question').value;
-            
-            // Valores fijos para identificación de usuario y origen
             const id_usuario = 321;
             const ugel_origen = "Formosa";
             
-            // Mostrar spinner y ocultar respuesta anterior
             document.getElementById('spinner').style.display = 'block';
             document.getElementById('responseContainer').style.display = 'none';
             document.getElementById('error').textContent = '';
+            currentConsultaId = null; // Limpiar ID de consulta anterior
             
             try {
-                // Realizar la solicitud al servidor
                 const response = await fetch('http://localhost:8000/api/complete_analysis', {
                     method: 'POST',
                     headers: {
@@ -197,88 +196,109 @@
                     },
                     body: JSON.stringify({
                         question_input: question,
-                        id_usuario: id_usuario,         // ID del usuario actual
-                        ugel_origen: ugel_origen        // UGL de origen del usuario
+                        id_usuario: id_usuario,
+                        ugel_origen: ugel_origen
                     })
                 });
                 
-                // Verificar si la respuesta es exitosa
                 if (!response.ok) {
-                    throw new Error(`Error en la solicitud: ${response.status} ${response.statusText}`);
+                    // Intentar obtener el cuerpo del error para más detalles
+                    let errorDetail = `Error en la solicitud: ${response.status} ${response.statusText}`;
+                    try {
+                        const errorData = await response.json();
+                        errorDetail = errorData.detail || errorDetail;
+                        currentConsultaId = errorData.metadata?.id_consulta; // Intentar obtener ID de consulta incluso en error
+                    } catch (e) { /* No hacer nada si el cuerpo del error no es JSON */ }
+                    throw new Error(errorDetail);
                 }
                 
-                // Procesar la respuesta
                 const data = await response.json();
                 
-                // Actualizar la interfaz con la respuesta
                 document.getElementById('response').textContent = data.answer;
                 
-                // Mostrar metadata
                 const metadata = data.metadata;
+                currentConsultaId = metadata.id_consulta; 
+                console.log("ID de Consulta recibido:", currentConsultaId);
+
                 document.getElementById('metadata').innerHTML = `
+                    <strong>ID Consulta:</strong> ${currentConsultaId || 'No disponible'}<br>
                     <strong>Modelo:</strong> ${metadata.model || 'No disponible'}<br>
                     <strong>Documentos recuperados:</strong> ${metadata.document_count || 0}<br>
-                    <strong>Periodo consultado:</strong> ${metadata.fecha_desde} a ${metadata.fecha_hasta}<br>
+                    <strong>Periodo consultado:</strong> ${metadata.fecha_desde || 'N/A'} a ${metadata.fecha_hasta || 'N/A'}<br>
                     <strong>Usuario:</strong> ${id_usuario} | <strong>UGL:</strong> ${ugel_origen}
                 `;
                 
-                // Mostrar el contenedor de respuesta
                 document.getElementById('responseContainer').style.display = 'block';
                 
-                // Resetear los botones de feedback cuando se muestra una nueva respuesta
                 const feedbackRadios = document.querySelectorAll('input[name="feedback"]');
                 feedbackRadios.forEach(radio => {
                     radio.checked = false;
+                    radio.disabled = !currentConsultaId; // Deshabilitar si no hay ID de consulta
                 });
                 document.getElementById('feedbackStatus').style.display = 'none';
                 
             } catch (error) {
-                // Mostrar mensaje de error
                 document.getElementById('error').textContent = error.message;
+                // Asegurarse de que los botones de feedback estén deshabilitados si falló la obtención de ID
+                const feedbackRadios = document.querySelectorAll('input[name="feedback"]');
+                feedbackRadios.forEach(radio => {
+                    radio.disabled = true;
+                });
             } finally {
-                // Ocultar spinner
                 document.getElementById('spinner').style.display = 'none';
             }
         });
         
-        // Añadir eventos para el feedback
         document.addEventListener('DOMContentLoaded', function() {
             const feedbackRadios = document.querySelectorAll('input[name="feedback"]');
             
             feedbackRadios.forEach(radio => {
                 radio.addEventListener('change', async function() {
-                    const feedbackValue = this.value;
-                    const id_usuario = 321;
-                    const ugel_origen = "Formosa";
-                    
+                    if (!currentConsultaId) {
+                        console.error('Error: id_consulta no está disponible para enviar feedback.');
+                        document.getElementById('error').textContent = 'Error: No se puede enviar feedback, ID de consulta no encontrado.';
+                        // Mantener los radios deshabilitados
+                        feedbackRadios.forEach(r => r.disabled = true);
+                        return;
+                    }
+
+                    const feedbackValue = this.value; 
+                    feedbackRadios.forEach(r => r.disabled = true);
+
                     try {
-                        // Enviar feedback al backend
-                        const response = await fetch('http://localhost:8000/api/feedback', {
+                        // Usar ruta relativa si el HTML es servido por el mismo servidor FastAPI
+                        const feedbackResponse = await fetch('http://localhost:8000/api/feedback', { 
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json'
                             },
                             body: JSON.stringify({
-                                feedback: feedbackValue,
-                                id_usuario: id_usuario,
-                                ugel_origen: ugel_origen
+                                id_consulta: currentConsultaId,
+                                feedback_value: feedbackValue
                             })
                         });
                         
-                        if (!response.ok) {
-                            throw new Error('Error al enviar feedback');
+                        const feedbackResponseData = await feedbackResponse.json();
+
+                        if (!feedbackResponse.ok) {
+                            throw new Error(feedbackResponseData.detail || 'Error al enviar feedback');
                         }
                         
-                        // Mostrar confirmación
                         const feedbackStatus = document.getElementById('feedbackStatus');
+                        feedbackStatus.textContent = feedbackResponseData.message || 'Feedback enviado correctamente';
                         feedbackStatus.style.display = 'block';
-                        setTimeout(() => {
-                            feedbackStatus.style.display = 'none';
-                        }, 3000);
+                        // No ocultar el mensaje inmediatamente, y mantener los radios deshabilitados
+                        // para indicar que el feedback para esta respuesta ya fue enviado.
+                        // Se reactivarán cuando se haga una nueva consulta.
                         
                     } catch (error) {
                         console.error('Error enviando feedback:', error);
                         document.getElementById('error').textContent = 'Error al enviar feedback: ' + error.message;
+                        // Re-habilitar en caso de error para que el usuario pueda intentarlo de nuevo
+                        // solo si currentConsultaId sigue siendo válido.
+                        if (currentConsultaId) {
+                            feedbackRadios.forEach(r => r.disabled = false);
+                        }
                     }
                 });
             });

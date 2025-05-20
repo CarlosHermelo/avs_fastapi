@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Estadísticas del Asistente - SIMAP</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f6f8; }
+        .container { max-width: 1300px; margin: auto; background-color: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; text-align: center; margin-bottom: 25px; }
+        .filters { margin-bottom: 25px; padding: 20px; border: 1px solid #dfe6e9; border-radius: 6px; background-color: #f9fafb;}
+        .filters label { margin-right: 8px; font-weight: bold; color: #34495e;}
+        .filters input[type="date"], .filters select { padding: 10px; margin-right: 15px; border: 1px solid #bdc3c7; border-radius: 4px; font-size: 14px; }
+        .filters button { padding: 10px 18px; background-color: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 15px; transition: background-color 0.3s ease; }
+        .filters button:hover { background-color: #2980b9; }
+        
+        .counters-container {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        
+        .counter-box {
+            background-color: #f8f9fa;
+            border: 1px solid #dfe6e9;
+            border-radius: 6px;
+            padding: 15px;
+            text-align: center;
+            margin: 10px;
+            min-width: 200px;
+        }
+        
+        .counter-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2980b9;
+        }
+        
+        .counter-label {
+            font-size: 14px;
+            color: #7f8c8d;
+            margin-top: 5px;
+        }
+        
+        .charts-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            margin-top: 20px;
+        }
+        
+        .chart-container {
+            border: 1px solid #dfe6e9;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 20px;
+            background-color: #fff;
+        }
+        
+        .pie-chart-container {
+            flex: 0 0 48%;
+        }
+        
+        .bar-chart-container {
+            flex: 0 0 100%;
+        }
+        
+        .loading-spinner { display: none; text-align: center; padding: 20px; }
+        .loading-spinner::after {
+            content: ""; display: inline-block; width: 30px; height: 30px;
+            border: 4px solid rgba(52, 152, 219, 0.2); border-radius: 50%;
+            border-top-color: #3498db; animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .error-message { color: #e74c3c; font-weight: bold; margin-top: 15px; text-align: center; }
+
+        @media (max-width: 768px) {
+            .pie-chart-container {
+                flex: 0 0 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Estadísticas del Asistente Virtual SIMAP</h1>
+
+        <div class="filters">
+            <label for="fecha_desde">Fecha Desde:</label>
+            <input type="date" id="fecha_desde" name="fecha_desde">
+
+            <label for="fecha_hasta">Fecha Hasta:</label>
+            <input type="date" id="fecha_hasta" name="fecha_hasta">
+
+            <label for="ugel_origen">UGEL Origen:</label>
+            <select id="ugel_origen" name="ugel_origen">
+                <option value="">Todos</option>
+                <!-- Opciones dinámicas se cargarán aquí -->
+            </select>
+
+            <button onclick="aplicarFiltros()">Aplicar Filtros</button>
+        </div>
+
+        <div id="loadingSpinner" class="loading-spinner">Cargando datos...</div>
+        <div id="errorMessage" class="error-message" style="display:none;"></div>
+
+        <!-- Contadores -->
+        <div class="counters-container">
+            <div class="counter-box">
+                <div class="counter-value" id="totalPreguntasCounter">0</div>
+                <div class="counter-label">Total de preguntas</div>
+            </div>
+            <div class="counter-box">
+                <div class="counter-value" id="totalTokensInputCounter">0</div>
+                <div class="counter-label">Total tokens de entrada</div>
+            </div>
+            <div class="counter-box">
+                <div class="counter-value" id="totalTokensOutputCounter">0</div>
+                <div class="counter-label">Total tokens de salida</div>
+            </div>
+        </div>
+
+        <!-- Gráficos -->
+        <div class="charts-container">
+            <div class="chart-container pie-chart-container">
+                <h3>Distribución de Utilidad de Respuestas</h3>
+                <canvas id="utilidadChart"></canvas>
+            </div>
+            <div class="chart-container pie-chart-container">
+                <h3>Distribución de Respuestas Vacías</h3>
+                <canvas id="respuestaVaciaChart"></canvas>
+            </div>
+            <div class="chart-container bar-chart-container">
+                <h3>Preguntas por UGEL</h3>
+                <canvas id="ugelChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuración del endpoint - Usar URL absoluta en lugar de relativa
+        const SERVER_URL = window.location.hostname.includes('localhost') ? 
+            `http://${window.location.host}` : '';
+
+        const API_ESTADISTICAS = `${SERVER_URL}/api/admin/estadisticas`;
+        const API_UGELS = `${SERVER_URL}/api/admin/ugels_disponibles`;
+        
+        let utilidadChart, respuestaVaciaChart, ugelChart;
+
+        // Cargar las UGELs disponibles al inicio
+        async function cargarUgels() {
+            try {
+                const response = await fetch(API_UGELS);
+                if (!response.ok) {
+                    throw new Error(`Error ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                const selectUgel = document.getElementById('ugel_origen');
+                
+                // Mantener la opción "Todos"
+                const opcionTodos = selectUgel.options[0];
+                selectUgel.innerHTML = '';
+                selectUgel.appendChild(opcionTodos);
+                
+                // Agregar las opciones dinámicas
+                data.forEach(ugel => {
+                    const option = document.createElement('option');
+                    option.value = ugel;
+                    option.textContent = ugel;
+                    selectUgel.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error al cargar UGELs:', error);
+                document.getElementById('errorMessage').textContent = "Error al cargar UGELs: " + error.message;
+                document.getElementById('errorMessage').style.display = 'block';
+            }
+        }
+
+        // Inicializar gráficos con datos vacíos
+        function inicializarGraficos() {
+            // Gráfico de utilidad
+            const ctxUtilidad = document.getElementById('utilidadChart').getContext('2d');
+            utilidadChart = new Chart(ctxUtilidad, {
+                type: 'pie',
+                data: {
+                    labels: ['Útil (Sí)', 'No útil (No)', 'Sin clasificar'],
+                    datasets: [{
+                        data: [0, 0, 0],
+                        backgroundColor: ['#2ecc71', '#e74c3c', '#95a5a6']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+
+            // Gráfico de respuestas vacías
+            const ctxVacia = document.getElementById('respuestaVaciaChart').getContext('2d');
+            respuestaVaciaChart = new Chart(ctxVacia, {
+                type: 'pie',
+                data: {
+                    labels: ['Con información', 'Sin información', 'Sin clasificar'],
+                    datasets: [{
+                        data: [0, 0, 0],
+                        backgroundColor: ['#3498db', '#f39c12', '#95a5a6']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+
+            // Gráfico de UGEL
+            const ctxUgel = document.getElementById('ugelChart').getContext('2d');
+            ugelChart = new Chart(ctxUgel, {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Cantidad de preguntas',
+                        data: [],
+                        backgroundColor: '#3498db'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Cantidad de preguntas'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'UGEL'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Aplicar filtros y actualizar gráficos
+        async function aplicarFiltros() {
+            const fechaDesde = document.getElementById('fecha_desde').value;
+            const fechaHasta = document.getElementById('fecha_hasta').value;
+            const ugelOrigen = document.getElementById('ugel_origen').value;
+
+            const spinner = document.getElementById('loadingSpinner');
+            const errorMessageDiv = document.getElementById('errorMessage');
+
+            spinner.style.display = 'block';
+            errorMessageDiv.style.display = 'none';
+
+            let queryParams = new URLSearchParams();
+            if (fechaDesde) queryParams.append('fecha_desde', fechaDesde);
+            if (fechaHasta) queryParams.append('fecha_hasta', fechaHasta);
+            if (ugelOrigen) queryParams.append('ugel_origen', ugelOrigen);
+
+            const apiUrl = `${API_ESTADISTICAS}?${queryParams.toString()}`;
+            console.log('DEBUG - URL de API a consultar:', apiUrl);
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    },
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({detail: "Error desconocido del servidor."}));
+                    throw new Error(`Error ${response.status}: ${errorData.detail || response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log('DEBUG - Datos recibidos:', data);
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                // Actualizar contadores
+                document.getElementById('totalPreguntasCounter').textContent = data.total_preguntas.toLocaleString();
+                document.getElementById('totalTokensInputCounter').textContent = data.total_tokens_input.toLocaleString();
+                document.getElementById('totalTokensOutputCounter').textContent = data.total_tokens_output.toLocaleString();
+                
+                // Actualizar gráfico de utilidad
+                utilidadChart.data.datasets[0].data = [
+                    data.utilidad.si,
+                    data.utilidad.no,
+                    data.utilidad.sin_clasificar
+                ];
+                utilidadChart.update();
+                
+                // Actualizar gráfico de respuestas vacías
+                respuestaVaciaChart.data.datasets[0].data = [
+                    data.respuesta_vacia.no,
+                    data.respuesta_vacia.si,
+                    data.respuesta_vacia.sin_clasificar
+                ];
+                respuestaVaciaChart.update();
+                
+                // Actualizar gráfico de UGEL
+                ugelChart.data.labels = data.ugel_preguntas.map(item => item.ugel);
+                ugelChart.data.datasets[0].data = data.ugel_preguntas.map(item => item.cantidad);
+                ugelChart.update();
+                
+            } catch (error) {
+                console.error('DEBUG - Error en fetch:', error);
+                errorMessageDiv.textContent = "Error al cargar datos: " + error.message;
+                errorMessageDiv.style.display = 'block';
+            } finally {
+                spinner.style.display = 'none';
+            }
+        }
+
+        // Inicializar la página
+        window.onload = () => {
+            // Establecer fechas predeterminadas (último mes)
+            const hoy = new Date();
+            const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+            
+            document.getElementById('fecha_hasta').value = hoy.toISOString().split('T')[0];
+            document.getElementById('fecha_desde').value = inicioMes.toISOString().split('T')[0];
+            
+            // Cargar UGELs disponibles
+            cargarUgels();
+            
+            // Inicializar gráficos
+            inicializarGraficos();
+            
+            // Cargar datos iniciales
+            setTimeout(aplicarFiltros, 500);
+        };
+    </script>
+</body>
+</html> 

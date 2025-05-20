@@ -5,13 +5,32 @@
 Script de prueba para verificar la funcionalidad de la base de datos vectorial Qdrant
 """
 
-import configparser
 import sys
 import json
-from carga_bdv_q1 import conectar_a_qdrant, cargar_configuracion
+import os
+from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings
 from qdrant_client import QdrantClient
 from langchain_qdrant import Qdrant
+
+def init_config():
+    """Inicializa la configuración desde variables de entorno"""
+    # Cargar variables de entorno
+    dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
+    if os.path.exists(dotenv_path):
+        load_dotenv(dotenv_path)
+    else:
+        load_dotenv()  # Intentar cargar desde el directorio actual
+
+    # Configuraciones desde variables de entorno
+    config = {
+        'QDRANT_URL': os.getenv('QDRANT_URL', 'http://localhost:6333'),
+        'COLLECTION_NAME': os.getenv('COLLECTION_NAME_FRAGMENTO', 'fragment_store'),
+        'DEFAULT_RESULTS': int(os.getenv('MAX_RESULTS', '5')),
+        'OPENAI_API_KEY': os.getenv('OPENAI_API_KEY')
+    }
+    
+    return config
 
 def buscar_en_qdrant_modificado(query, openai_api_key, url_qdrant, collection_name, max_results=5):
     """
@@ -19,7 +38,7 @@ def buscar_en_qdrant_modificado(query, openai_api_key, url_qdrant, collection_na
     """
     # Inicializar cliente y embeddings
     client = QdrantClient(url=url_qdrant)
-    embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
+    embeddings = OpenAIEmbeddings(api_key=openai_api_key)
     
     try:
         # Verificar que la colección existe
@@ -54,98 +73,96 @@ def buscar_en_qdrant_modificado(query, openai_api_key, url_qdrant, collection_na
     return docs_con_score
 
 def main():
-    # Cargar configuración
-    try:
-        config = cargar_configuracion()
-        
-        # Obtener parámetros de configuración
-        openai_api_key = config['DEFAULT']['openai_api_key']
-        url_qdrant = config['SERVICIOS_SIMAP_Q'].get('qdrant_url', 'http://localhost:6333')
-        # Usar directamente fragment_store como nombre de colección
-        collection_name = 'fragment_store'
-        max_results = int(config['SERVICIOS_SIMAP_Q'].get('max_results', 5))
-        
-        # Verificar si la colección existe y está accesible
-        print(f"Conectando a Qdrant en {url_qdrant}, colección {collection_name}...")
-        
-        # Inicializar embeddings
-        embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
-        
-        try:
-            # Inicializar cliente
-            client = QdrantClient(url=url_qdrant)
-            
-            # Verificar que la colección existe
-            client.get_collection(collection_name)
-            print(f"Colección {collection_name} encontrada.")
-        except Exception as e:
-            if "doesn't exist" in str(e):
-                # Intentar usar fragment_store como alternativa
-                collection_name = 'fragment_store'
-                print(f"Intentando conectar a la colección alternativa: {collection_name}")
-                try:
-                    client = QdrantClient(url=url_qdrant)
-                    client.get_collection(collection_name)
-                    print(f"Colección alternativa {collection_name} encontrada.")
-                except Exception as e2:
-                    print(f"Error al conectar con la colección alternativa: {str(e2)}")
-                    return 1
-            else:
-                print(f"Error al conectar con Qdrant: {str(e)}")
-                return 1
-        
-        # Crear objeto Qdrant
-        qdrant = Qdrant(
-            client=client,
-            collection_name=collection_name,
-            embeddings=embeddings,  # Usar embeddings en lugar de embedding_function
-        )
-        
-        print("Conexión exitosa a Qdrant.")
-        
-        # Realizar una búsqueda de prueba
-        query = input("\nIngrese consulta para buscar en la base de datos (o 'salir' para terminar): ")
-        
-        while query.lower() != 'salir':
-            try:
-                # Realizar búsqueda usando nuestra función modificada
-                resultados = buscar_en_qdrant_modificado(
-                    query=query,
-                    openai_api_key=openai_api_key,
-                    url_qdrant=url_qdrant,
-                    collection_name=collection_name,
-                    max_results=max_results
-                )
-                
-                # Mostrar resultados
-                if resultados:
-                    print(f"\nResultados para: '{query}'")
-                    for i, doc in enumerate(resultados, 1):
-                        print(f"\n--- Resultado {i} (Score: {doc['score']:.4f}) ---")
-                        print(f"Servicio: {doc['metadata'].get('servicio', 'N/A')}")
-                        print(f"Tipo: {doc['metadata'].get('tipo', 'N/A')}")
-                        print(f"Subtipo: {doc['metadata'].get('subtipo', 'N/A')}")
-                        print(f"ID_SUB: {doc['metadata'].get('id_sub', 'N/A')}")
-                        print("\nContenido:")
-                        # Mostrar solo primeros 300 caracteres para no saturar la pantalla
-                        contenido = doc['contenido']
-                        if len(contenido) > 300:
-                            contenido = contenido[:300] + "..."
-                        print(contenido)
-                else:
-                    print("No se encontraron resultados.")
-            except Exception as e:
-                print(f"Error al realizar la búsqueda: {str(e)}")
-            
-            # Preguntar por nueva consulta
-            query = input("\nIngrese nueva consulta (o 'salir' para terminar): ")
-        
-        print("Prueba completada.")
-        return 0
-        
-    except Exception as e:
-        print(f"Error: {str(e)}")
+    # Obtener configuración
+    config = init_config()
+    
+    # Verificar API key de OpenAI
+    if not config['OPENAI_API_KEY']:
+        print("Error: No se encontró la API key de OpenAI en el archivo .env")
         return 1
+        
+    print(f"API key de OpenAI encontrada: {config['OPENAI_API_KEY'][:5]}...")
+    print(f"URL de Qdrant: {config['QDRANT_URL']}")
+    print(f"Colección a consultar: {config['COLLECTION_NAME']}")
+    
+    # Verificar si la colección existe y está accesible
+    print(f"Conectando a Qdrant en {config['QDRANT_URL']}, colección {config['COLLECTION_NAME']}...")
+    
+    # Inicializar embeddings
+    embeddings = OpenAIEmbeddings(api_key=config['OPENAI_API_KEY'])
+    
+    try:
+        # Inicializar cliente
+        client = QdrantClient(url=config['QDRANT_URL'])
+        
+        # Verificar que la colección existe
+        collection_name = config['COLLECTION_NAME']
+        client.get_collection(collection_name)
+        print(f"Colección {collection_name} encontrada.")
+    except Exception as e:
+        if "doesn't exist" in str(e):
+            # Intentar usar fragment_store como alternativa
+            collection_name = 'fragment_store'
+            print(f"Intentando conectar a la colección alternativa: {collection_name}")
+            try:
+                client = QdrantClient(url=config['QDRANT_URL'])
+                client.get_collection(collection_name)
+                print(f"Colección alternativa {collection_name} encontrada.")
+            except Exception as e2:
+                print(f"Error al conectar con la colección alternativa: {str(e2)}")
+                return 1
+        else:
+            print(f"Error al conectar con Qdrant: {str(e)}")
+            return 1
+    
+    # Crear objeto Qdrant
+    qdrant = Qdrant(
+        client=client,
+        collection_name=collection_name,
+        embeddings=embeddings,  # Usar embeddings en lugar de embedding_function
+    )
+    
+    print("Conexión exitosa a Qdrant.")
+    
+    # Realizar una búsqueda de prueba
+    query = input("\nIngrese consulta para buscar en la base de datos (o 'salir' para terminar): ")
+    
+    while query.lower() != 'salir':
+        try:
+            # Realizar búsqueda usando nuestra función modificada
+            resultados = buscar_en_qdrant_modificado(
+                query=query,
+                openai_api_key=config['OPENAI_API_KEY'],
+                url_qdrant=config['QDRANT_URL'],
+                collection_name=collection_name,
+                max_results=config['DEFAULT_RESULTS']
+            )
+            
+            # Mostrar resultados
+            if resultados:
+                print(f"\nResultados para: '{query}'")
+                for i, doc in enumerate(resultados, 1):
+                    print(f"\n--- Resultado {i} (Score: {doc['score']:.4f}) ---")
+                    print(f"Servicio: {doc['metadata'].get('servicio', 'N/A')}")
+                    print(f"Tipo: {doc['metadata'].get('tipo', 'N/A')}")
+                    print(f"Subtipo: {doc['metadata'].get('subtipo', 'N/A')}")
+                    print(f"ID_SUB: {doc['metadata'].get('id_sub', 'N/A')}")
+                    print("\nContenido:")
+                    # Mostrar solo primeros 300 caracteres para no saturar la pantalla
+                    contenido = doc['contenido']
+                    if len(contenido) > 300:
+                        contenido = contenido[:300] + "..."
+                    print(contenido)
+            else:
+                print("No se encontraron resultados.")
+        except Exception as e:
+            print(f"Error al realizar la búsqueda: {str(e)}")
+        
+        # Preguntar por nueva consulta
+        query = input("\nIngrese nueva consulta (o 'salir' para terminar): ")
+    
+    print("Prueba completada.")
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main()) 
