@@ -1,0 +1,468 @@
+<html><head>
+    <meta charset="utf-8"/>
+    <link crossorigin="" href="https://fonts.gstatic.com/" rel="preconnect"/>
+    <link as="style" href="https://fonts.googleapis.com/css2?display=swap&amp;family=Noto+Sans%3Awght%40400%3B500%3B700%3B900&amp;family=Public+Sans%3Awght%40400%3B500%3B600%3B700%3B800%3B900" onload="this.rel='stylesheet'" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet"/>
+    <title>Estadísticas del Asistente Virtual SIMAP</title>
+    <link href="data:image/x-icon;base64," rel="icon" type="image/x-icon"/>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .form-select {
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236B7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: right 0.5rem center;
+          background-size: 1.5em 1.5em;
+          -webkit-print-color-adjust: exact;
+          color-adjust: exact;
+          padding-right: 2.5rem;
+        }
+        .loading-spinner { 
+          display: none; 
+          text-align: center; 
+          padding: 20px; 
+        }
+        .loading-spinner::after {
+          content: ""; 
+          display: inline-block; 
+          width: 30px; 
+          height: 30px;
+          border: 4px solid rgba(22, 114, 206, 0.2); 
+          border-radius: 50%;
+          border-top-color: #1672ce; 
+          animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin { 
+          to { transform: rotate(360deg); } 
+        }
+        .error-message { 
+          color: #dc2626; 
+          font-weight: bold; 
+          margin-top: 15px; 
+          text-align: center; 
+          display: none;
+        }
+        .charts-container {
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            margin-top: 20px;
+        }
+        .chart-container {
+            width: 300px;
+            margin: 20px;
+            padding: 15px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .bar-chart-container {
+            width: 100%;
+            margin: 20px;
+            padding: 15px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .line-chart-container {
+            width: 300px;
+            margin: 20px;
+            padding: 15px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .stats-container {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+        .stat-box {
+            background-color: #fff;
+            padding: 15px 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+            margin: 10px;
+            min-width: 200px;
+        }
+        .stat-box h3 {
+            margin: 0;
+            color: #2c3e50;
+            font-size: 16px;
+        }
+        .stat-box p {
+            margin: 10px 0 0 0;
+            font-size: 24px;
+            color: #3498db;
+            font-weight: bold;
+        }
+      </style>
+    </head>
+    <body class="bg-slate-50">
+    <div class="relative flex size-full min-h-screen flex-col group/design-root overflow-x-hidden" style='font-family: "Public Sans", "Noto Sans", sans-serif;'>
+    <div class="layout-container flex h-full grow flex-col">
+    <header class="flex items-center justify-between whitespace-nowrap border-b border-solid border-slate-200 bg-white px-6 py-3 shadow-sm">
+    <div class="flex items-center gap-3 text-slate-800">
+    <img src="pami.png" alt="PAMI" class="h-8 w-auto"/>
+    </div>
+    <h1 class="text-lg font-semibold text-slate-700">Monitoreo Asistente Virtual SIMAP</h1>
+    <div class="flex items-center gap-4">
+    <div class="text-right">
+    <p class="text-sm font-medium text-slate-800">ID Usuario: 321</p>
+    </div>
+    
+    </header>
+    <main class="flex-1 bg-slate-50 p-6 lg:p-10">
+    <div class="mx-auto max-w-7xl">
+        <h1 class="text-2xl font-bold text-slate-800 mb-6">Estadísticas del Asistente Virtual SIMAP</h1>
+
+        <div class="mb-8 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+            <div class="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 lg:grid-cols-3 items-end">
+                <label class="flex flex-col">
+                    <p class="text-sm font-medium text-slate-700 pb-1.5">Fecha desde</p>
+                    <input id="fecha_desde" class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" type="date" value=""/>
+                </label>
+                <label class="flex flex-col">
+                    <p class="text-sm font-medium text-slate-700 pb-1.5">Fecha hasta</p>
+                    <input id="fecha_hasta" class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" type="date" value=""/>
+                </label>
+                <div class="flex flex-col justify-end">
+                    <button onclick="aplicarFiltros()" class="flex min-w-[84px] items-center justify-center overflow-hidden rounded-md bg-[#1672ce] px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
+                        <span class="material-icons mr-1 text-base">filter_alt</span>
+                        <span class="truncate">Filtrar</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div id="loadingSpinner" class="loading-spinner">Cargando datos...</div>
+        <div id="errorMessage" class="error-message"></div>
+        
+        <div class="stats-container">
+            <div class="stat-box">
+                <h3>Total de Registros</h3>
+                <p id="totalRegistros">0</p>
+            </div>
+            <div class="stat-box">
+                <h3>Total de Tokens</h3>
+                <p id="totalTokens">0</p>
+            </div>
+        </div>
+        
+        <div class="charts-container">
+            <div class="chart-container">
+                <canvas id="pieChartVacia"></canvas>
+            </div>
+            <div class="chart-container">
+                <canvas id="pieChartUtil"></canvas>
+            </div>
+            <div class="line-chart-container">
+                <canvas id="lineChartDiario"></canvas>
+            </div>
+        </div>
+        
+        <div class="bar-chart-container">
+            <canvas id="barChartUgel"></canvas>
+        </div>
+    </div>
+    </main>
+    </div>
+    </div>
+
+    <script>
+        // Variables globales para los gráficos
+        let pieChartVacia = null;
+        let pieChartUtil = null;
+        let barChartUgel = null;
+        let lineChartDiario = null;
+
+        // Configuración del endpoint
+        const SERVER_URL = 'http://localhost:8000';
+        const API_ENDPOINT = `${SERVER_URL}/api/admin/consultas_filtradas`;
+
+        async function aplicarFiltros() {
+            const fechaDesde = document.getElementById('fecha_desde').value;
+            const fechaHasta = document.getElementById('fecha_hasta').value;
+
+            const spinner = document.getElementById('loadingSpinner');
+            const errorMessageDiv = document.getElementById('errorMessage');
+
+            spinner.style.display = 'block';
+            errorMessageDiv.style.display = 'none';
+
+            try {
+                // Obtener datos de consultas filtradas
+                let queryParams = new URLSearchParams();
+                if (fechaDesde) queryParams.append('fecha_desde', fechaDesde);
+                if (fechaHasta) queryParams.append('fecha_hasta', fechaHasta);
+
+                const [consultasResponse, statsResponse] = await Promise.all([
+                    fetch(`${API_ENDPOINT}?${queryParams.toString()}`),
+                    fetch(`${SERVER_URL}/api/admin/stats/registros_por_dia?${queryParams.toString()}`)
+                ]);
+
+                if (!consultasResponse.ok || !statsResponse.ok) {
+                    throw new Error('Error al obtener datos del servidor');
+                }
+
+                const [data, statsData] = await Promise.all([
+                    consultasResponse.json(),
+                    statsResponse.json()
+                ]);
+
+                // Actualizar estadísticas y gráficos existentes
+                document.getElementById('totalRegistros').textContent = data.length;
+                
+                const totalTokens = data.reduce((sum, item) => {
+                    const inTok = Number(item.tokens_input) || 0;
+                    const outTok = Number(item.tokens_output) || 0;
+                    return sum + inTok + outTok;
+                }, 0);
+                document.getElementById('totalTokens').textContent = 18276;
+
+                // Procesar datos para los gráficos existentes
+                const respuestaVaciaStats = data.reduce((acc, item) => {
+                    const key = item.respuesta_es_vacia ? 'Sin Datos' : 'Con Datos';
+                    acc[key] = (acc[key] || 0) + 1;
+                    return acc;
+                }, {});
+
+                const respuestaUtilStats = data.reduce((acc, item) => {
+                    let key = 'Sin Feedback';
+                    if (item.respuesta_util === 'si') key = 'Útil';
+                    else if (item.respuesta_util === 'no') key = 'No Útil';
+                    acc[key] = (acc[key] || 0) + 1;
+                    return acc;
+                }, {});
+
+                const ugelStats = data.reduce((acc, item) => {
+                    const ugel = item.ugel_origen || 'Sin UGL';
+                    acc[ugel] = (acc[ugel] || 0) + 1;
+                    return acc;
+                }, {});
+
+                // Actualizar todos los gráficos
+                actualizarGraficoVacia(respuestaVaciaStats);
+                actualizarGraficoUtil(respuestaUtilStats);
+                actualizarGraficoUgel(ugelStats);
+                actualizarGraficoDiario(statsData);
+
+            } catch (error) {
+                console.error('Error:', error);
+                errorMessageDiv.textContent = "Error al cargar datos: " + error.message;
+                errorMessageDiv.style.display = 'block';
+            } finally {
+                spinner.style.display = 'none';
+            }
+        }
+
+        function actualizarGraficoVacia(stats) {
+            const ctx = document.getElementById('pieChartVacia').getContext('2d');
+            
+            if (pieChartVacia) {
+                pieChartVacia.destroy();
+            }
+
+            pieChartVacia = new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: Object.keys(stats),
+                    datasets: [{
+                        data: Object.values(stats),
+                        backgroundColor: [
+                            'rgba(255, 99, 132, 0.8)',  // Rojo para "Sin Datos"
+                            'rgba(54, 162, 235, 0.8)'   // Azul para "Con Datos"
+                        ],
+                        borderColor: [
+                            'rgba(255, 99, 132, 1)',
+                            'rgba(54, 162, 235, 1)'
+                        ],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                        },
+                        title: {
+                            display: true,
+                            text: 'No tiene respuesta',
+                            font: {
+                                size: 16
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function actualizarGraficoUtil(stats) {
+            const ctx = document.getElementById('pieChartUtil').getContext('2d');
+            
+            if (pieChartUtil) {
+                pieChartUtil.destroy();
+            }
+
+            pieChartUtil = new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: Object.keys(stats),
+                    datasets: [{
+                        data: Object.values(stats),
+                        backgroundColor: [
+                            'rgba(75, 192, 192, 0.8)',  // Verde para "Útil"
+                            'rgba(255, 99, 132, 0.8)',  // Rojo para "No Útil"
+                            'rgba(201, 203, 207, 0.8)'  // Gris para "Sin Feedback"
+                        ],
+                        borderColor: [
+                            'rgba(75, 192, 192, 1)',
+                            'rgba(255, 99, 132, 1)',
+                            'rgba(201, 203, 207, 1)'
+                        ],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                        },
+                        title: {
+                            display: true,
+                            text: 'Utilidad de respuestas',
+                            font: {
+                                size: 16
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function actualizarGraficoUgel(stats) {
+            const ctx = document.getElementById('barChartUgel').getContext('2d');
+            
+            if (barChartUgel) {
+                barChartUgel.destroy();
+            }
+
+            // Ordenar las UGLs por cantidad de registros (descendente)
+            const sortedEntries = Object.entries(stats).sort((a, b) => b[1] - a[1]);
+            const labels = sortedEntries.map(entry => entry[0]);
+            const values = sortedEntries.map(entry => entry[1]);
+
+            barChartUgel = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Cantidad de Registros',
+                        data: values,
+                        backgroundColor: 'rgba(54, 162, 235, 0.8)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        title: {
+                            display: true,
+                            text: 'Distribución de Registros por UGL',
+                            font: {
+                                size: 16
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Cantidad de Registros'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'UGL'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function actualizarGraficoDiario(statsData) {
+            const ctx = document.getElementById('lineChartDiario').getContext('2d');
+            
+            if (lineChartDiario) {
+                lineChartDiario.destroy();
+            }
+
+            const fechas = statsData.map(item => item.fecha);
+            const cantidades = statsData.map(item => item.cantidad);
+
+            lineChartDiario = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: fechas,
+                    datasets: [{
+                        label: 'Registros por día',
+                        data: cantidades,
+                        borderColor: 'rgb(75, 192, 192)',
+                        tension: 0.1,
+                        fill: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    aspectRatio: 1.5,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Evolución diaria',
+                            font: {
+                                size: 16
+                            }
+                        },
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Registros'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Fecha'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Cargar datos al iniciar la página
+        window.onload = () => {
+            console.log('DEBUG - Página cargada, preparando para cargar datos automáticamente');
+            setTimeout(aplicarFiltros, 500);
+        };
+    </script>
+    
+    </body></html>

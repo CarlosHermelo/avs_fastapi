@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Monitoreo Asistente Virtual SIMAP</title>
+  <link crossorigin href="https://fonts.gstatic.com/" rel="preconnect" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&family=Noto+Sans:wght@400;500;700;900&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+</head>
+<body class="bg-slate-100">
+  <div class="flex min-h-screen flex-col" style="font-family: Inter, 'Noto Sans', sans-serif;">
+    <header class="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4 shadow-sm">
+      <div class="flex items-center gap-3">
+        
+        <h1 class="text-xl font-semibold text-slate-900">PAMI</h1>
+      </div>
+      <h2 class="text-lg font-medium text-slate-700">Monitoreo Asistente Virtual SIMAP</h2>
+      <div class="flex items-center gap-3">
+        <div class="text-right">
+          <p class="text-sm font-medium text-slate-900">Isabella Rodriguez</p>
+          <p class="text-xs text-slate-600">UGL: Central</p>
+        </div>
+        <div class="h-10 w-10 rounded-full border border-slate-300 bg-cover bg-center bg-no-repeat shadow-sm" style="background-image: url('https://example.com/avatar.jpg');"></div>
+      </div>
+    </header>
+
+    <main class="flex flex-1 flex-col items-center justify-center p-8">
+      <div class="w-full max-w-4xl rounded-xl bg-white p-8 shadow-lg">
+        <div class="mb-12 text-center"></div>
+
+        <div class="grid grid-cols-1 gap-8 md:grid-cols-3">
+          <a class="group flex flex-col items-center justify-center rounded-lg border border-slate-200 bg-slate-50 p-8 text-center shadow-sm transition-all hover:shadow-xl hover:border-[#1672ce] hover:bg-white" href="consulta_estadistica.html">
+            <span class="material-icons mb-4 text-5xl text-[#1672ce]">bar_chart</span>
+            <h4 class="text-xl font-semibold text-slate-800">Estadísticas</h4>
+            <p class="mt-2 text-sm text-slate-600">Visualiza datos y métricas clave.</p>
+          </a>
+          <a class="group flex flex-col items-center justify-center rounded-lg border border-slate-200 bg-slate-50 p-8 text-center shadow-sm transition-all hover:shadow-xl hover:border-[#1672ce] hover:bg-white" href="consulta_respuesta.html">
+            <span class="material-icons mb-4 text-5xl text-[#1672ce]">manage_search</span>
+            <h4 class="text-xl font-semibold text-slate-800">Consultas</h4>
+            <p class="mt-2 text-sm text-slate-600">Analiza la calidad de las preguntas y respuestas.</p>
+          </a>
+          <a class="group flex flex-col items-center justify-center rounded-lg border border-slate-200 bg-slate-50 p-8 text-center shadow-sm transition-all hover:shadow-xl hover:border-[#1672ce] hover:bg-white" href="evaluacion_temas.html">
+            <span class="material-icons mb-4 text-5xl text-[#1672ce]">model_training</span>
+            <h4 class="text-xl font-semibold text-slate-800">Evaluación de Entrenamiento</h4>
+            <p class="mt-2 text-sm text-slate-600">Revisa y califica el rendimiento del entrenamiento.</p>
+          </a>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

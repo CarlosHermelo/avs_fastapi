@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Consultas del Asistente - Admin</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+</head>
+<body class="bg-gray-100 p-6 font-sans">
+    <div class="max-w-6xl mx-auto bg-white p-6 rounded-lg shadow">
+        <h1 class="text-2xl font-bold text-center text-gray-800 mb-6">Analisis de Respuestas del Asistente Virtual SIMAP</h1>
+
+        <div class="mb-6 p-4 border border-gray-200 rounded-md bg-gray-50">
+            <div class="flex flex-wrap items-center gap-4">
+                <label for="fecha_desde" class="font-semibold text-gray-700">Fecha Desde:</label>
+                <input type="date" id="fecha_desde" name="fecha_desde" class="border border-gray-300 rounded px-3 py-2 text-sm">
+
+                <label for="fecha_hasta" class="font-semibold text-gray-700">Fecha Hasta:</label>
+                <input type="date" id="fecha_hasta" name="fecha_hasta" class="border border-gray-300 rounded px-3 py-2 text-sm">
+
+                <label for="respuesta_vacia" class="font-semibold text-gray-700">Sin datos:</label>
+                <select id="respuesta_vacia" name="respuesta_vacia" class="border border-gray-300 rounded px-3 py-2 text-sm">
+                    <option value="">Todos</option>
+                    <option value="1">Sí</option>
+                    <option value="0">No</option>
+                </select>
+
+                <label for="respuesta_util" class="font-semibold text-gray-700">Utilidad:</label>
+                <select id="respuesta_util" name="respuesta_util" class="border border-gray-300 rounded px-3 py-2 text-sm">
+                    <option value="">Todos</option>
+                    <option value="si">Sí</option>
+                    <option value="no">No</option>
+                    <option value="nada">Sin feedback</option>
+                </select>
+
+                <button onclick="aplicarFiltros()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded text-sm">Filtrar</button>
+            </div>
+        </div>
+
+        <div id="loadingSpinner" class="text-center py-4 hidden">Cargando datos...</div>
+        <div id="errorMessage" class="text-red-600 font-semibold text-center mt-4 hidden"></div>
+
+        <div class="overflow-y-auto max-h-[600px] border border-gray-200 rounded-md mt-6">
+            <table id="tablaConsultas" class="min-w-full border-collapse text-sm">
+                <thead class="bg-gray-100 sticky top-0 z-10">
+                    <tr>
+                        <th class="px-4 py-3 border border-gray-200 text-left text-gray-700">Timestamp</th>
+                        <th class="px-4 py-3 border border-gray-200 text-left text-gray-700">ID Usuario</th>
+                        <th class="px-4 py-3 border border-gray-200 text-left text-gray-700">UGEL Origen</th>
+                        <th class="px-4 py-3 border border-gray-200 text-left text-gray-700">Pregunta (resumen)</th>
+                        <th class="px-4 py-3 border border-gray-200 text-left text-gray-700">Respuesta (resumen)</th>
+                        <th class="px-4 py-3 border border-gray-200 text-left text-gray-700">Sin datos</th>
+                        <th class="px-4 py-3 border border-gray-200 text-left text-gray-700">Utilidad</th>
+                        <th class="px-4 py-3 border border-gray-200 text-left text-gray-700">Acción</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Los datos se cargarán aquí -->
+                </tbody>
+            </table>
+        </div>
+        <div id="noResults" class="text-center py-6 italic text-gray-500 hidden">No se encontraron registros con los filtros aplicados.</div>
+    </div>
+
+    <script>
+        const SERVER_URL = 'http://localhost:8000';
+        const API_ENDPOINT = `${SERVER_URL}/api/admin/consultas_filtradas`;
+        const API_ESTADISTICAS = `${SERVER_URL}/api/admin/estadisticas`;
+        const API_UGELS = `${SERVER_URL}/api/admin/ugels_disponibles`;
+
+        async function aplicarFiltros() {
+            const fechaDesde = document.getElementById('fecha_desde').value;
+            const fechaHasta = document.getElementById('fecha_hasta').value;
+            const respuestaVacia = document.getElementById('respuesta_vacia').value;
+            const respuestaUtil = document.getElementById('respuesta_util').value;
+
+            const spinner = document.getElementById('loadingSpinner');
+            const errorMessageDiv = document.getElementById('errorMessage');
+            const noResultsDiv = document.getElementById('noResults');
+            const tablaBody = document.getElementById('tablaConsultas').getElementsByTagName('tbody')[0];
+
+            spinner.style.display = 'block';
+            errorMessageDiv.style.display = 'none';
+            noResultsDiv.style.display = 'none';
+            tablaBody.innerHTML = '';
+
+            let queryParams = new URLSearchParams();
+            if (fechaDesde) queryParams.append('fecha_desde', fechaDesde);
+            if (fechaHasta) queryParams.append('fecha_hasta', fechaHasta);
+            if (respuestaVacia !== "") queryParams.append('respuesta_es_vacia', respuestaVacia);
+            if (respuestaUtil !== "") queryParams.append('respuesta_util', respuestaUtil);
+
+            const apiUrl = `${API_ENDPOINT}?${queryParams.toString()}`;
+            console.log('DEBUG - URL de API a consultar:', apiUrl);
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    },
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({detail: "Error desconocido del servidor."}));
+                    throw new Error(`Error ${response.status}: ${errorData.detail || response.statusText}`);
+                }
+
+                const data = await response.json();
+
+                if (data.error) throw new Error(data.error);
+
+                if (data.length === 0) {
+                    noResultsDiv.style.display = 'block';
+                } else {
+                    data.forEach(consulta => {
+                        const row = tablaBody.insertRow();
+                        row.insertCell().textContent = new Date(consulta.timestamp).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'medium'});
+                        row.insertCell().textContent = consulta.id_usuario;
+                        row.insertCell().textContent = consulta.ugel_origen;
+
+                        const preguntaCell = row.insertCell();
+                        preguntaCell.textContent = consulta.pregunta_usuario_truncada;
+                        preguntaCell.title = consulta.pregunta_usuario_completa;
+                        preguntaCell.classList.add('truncate', 'max-w-xs');
+
+                        const respuestaCell = row.insertCell();
+                        respuestaCell.textContent = consulta.respuesta_asistente_truncada;
+                        respuestaCell.title = consulta.respuesta_asistente_completa;
+                        respuestaCell.classList.add('truncate', 'max-w-xs');
+
+                        row.insertCell().textContent = consulta.respuesta_es_vacia ? 'Sí' : 'No';
+
+                        const utilidadCell = row.insertCell();
+                        utilidadCell.textContent =
+                            consulta.respuesta_util === "si" ? 'Sí' :
+                            consulta.respuesta_util === "no" ? 'No' :
+                            consulta.respuesta_util === "nada" ? 'Sin feedback' :
+                            consulta.respuesta_util || 'Sin definir';
+
+                        const actionCell = row.insertCell();
+                        const verButton = document.createElement('button');
+                        verButton.textContent = 'Ver';
+                        verButton.className = 'bg-green-600 hover:bg-green-700 text-white text-sm px-3 py-1 rounded';
+                        verButton.onclick = function() {
+                            verDetalle(consulta.id_consulta, consulta);
+                        };
+                        actionCell.appendChild(verButton);
+                    });
+                }
+            } catch (error) {
+                console.error('DEBUG - Error en fetch:', error);
+                errorMessageDiv.textContent = "Error al cargar datos: " + error.message;
+                errorMessageDiv.style.display = 'block';
+            } finally {
+                spinner.style.display = 'none';
+            }
+        }
+
+        function verDetalle(idConsulta, consultaCompleta) {
+            alert(`Acción \"Ver\" para la consulta ID: ${idConsulta}.\n\nPregunta: ${consultaCompleta.pregunta_usuario_completa}\n\nRespuesta: ${consultaCompleta.respuesta_asistente_completa}\n\n (Implementar modal o vista detallada)`);
+        }
+
+        window.onload = () => {
+            setTimeout(aplicarFiltros, 500);
+        };
+    </script>
+</body>
+</html>

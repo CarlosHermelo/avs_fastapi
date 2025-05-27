@@ -777,7 +777,7 @@ async def obtener_consultas_filtradas_admin(
         conn = get_admin_db_connection()
         cursor = conn.cursor()
 
-        # Construir la consulta SQL base (agregado tokens_input y tokens_output)
+        # Construir la consulta SQL base
         query = """
             SELECT 
                 id_consulta,
@@ -810,7 +810,7 @@ async def obtener_consultas_filtradas_admin(
         
         if respuesta_util is not None:
             query += " AND respuesta_util = ?"
-            params.append(respuesta_util)  # 'si', 'no' o 'nada'
+            params.append(respuesta_util)
 
         # Ordenar por timestamp descendente
         query += " ORDER BY timestamp DESC"
@@ -821,26 +821,45 @@ async def obtener_consultas_filtradas_admin(
         # Procesar los resultados
         results = []
         for row in rows:
-            pregunta_completa = row[4] or ""
-            respuesta_completa = row[5] or ""
+            # Determinar si estamos trabajando con un diccionario (MySQL) o una tupla/Row (SQLite)
+            if isinstance(row, dict):
+                # MySQL con DictCursor
+                pregunta_completa = row['pregunta_usuario'] or ""
+                respuesta_completa = row['respuesta_asistente'] or ""
+                result = {
+                    "id_consulta": row['id_consulta'],
+                    "timestamp": row['timestamp'],
+                    "id_usuario": row['id_usuario'],
+                    "ugel_origen": row['ugel_origen'],
+                    "pregunta_usuario_completa": pregunta_completa,
+                    "pregunta_usuario_truncada": pregunta_completa[:50] + "..." if len(pregunta_completa) > 50 else pregunta_completa,
+                    "respuesta_asistente_completa": respuesta_completa,
+                    "respuesta_asistente_truncada": respuesta_completa[:50] + "..." if len(respuesta_completa) > 50 else respuesta_completa,
+                    "respuesta_es_vacia": bool(row['respuesta_es_vacia']),
+                    "respuesta_util": row['respuesta_util'] if row['respuesta_util'] is not None else "nada",
+                    "tokens_input": row['tokens_input'] if row['tokens_input'] is not None else 0,
+                    "tokens_output": row['tokens_output'] if row['tokens_output'] is not None else 0
+                }
+            else:
+                # SQLite con Row o tupla
+                pregunta_completa = row[4] if row[4] is not None else ""
+                respuesta_completa = row[5] if row[5] is not None else ""
+                result = {
+                    "id_consulta": row[0],
+                    "timestamp": row[1],
+                    "id_usuario": row[2],
+                    "ugel_origen": row[3],
+                    "pregunta_usuario_completa": pregunta_completa,
+                    "pregunta_usuario_truncada": pregunta_completa[:50] + "..." if len(pregunta_completa) > 50 else pregunta_completa,
+                    "respuesta_asistente_completa": respuesta_completa,
+                    "respuesta_asistente_truncada": respuesta_completa[:50] + "..." if len(respuesta_completa) > 50 else respuesta_completa,
+                    "respuesta_es_vacia": bool(row[6]),
+                    "respuesta_util": row[7] if row[7] is not None else "nada",
+                    "tokens_input": row[8] if row[8] is not None else 0,
+                    "tokens_output": row[9] if row[9] is not None else 0
+                }
             
-            pregunta_truncada = pregunta_completa[:50] + "..." if len(pregunta_completa) > 50 else pregunta_completa
-            respuesta_truncada = respuesta_completa[:50] + "..." if len(respuesta_completa) > 50 else respuesta_completa
-            
-            results.append({
-                "id_consulta": row[0],
-                "timestamp": row[1],
-                "id_usuario": row[2],
-                "ugel_origen": row[3],
-                "pregunta_usuario_completa": pregunta_completa,
-                "pregunta_usuario_truncada": pregunta_truncada,
-                "respuesta_asistente_completa": respuesta_completa,
-                "respuesta_asistente_truncada": respuesta_truncada,
-                "respuesta_es_vacia": bool(row[6]),
-                "respuesta_util": row[7] if row[7] is not None else "nada",
-                "tokens_input": row[8] if row[8] is not None else 0,
-                "tokens_output": row[9] if row[9] is not None else 0
-            })
+            results.append(result)
         
         cursor.close()
         conn.close()
@@ -854,7 +873,7 @@ async def obtener_consultas_filtradas_admin(
 
 @router.post("/feedback", summary="Registrar feedback para una consulta")
 async def handle_feedback(request: FeedbackRequest):
-    logger.info("--- INICIO Endpoint /api/feedback ---") # Log de inicio
+    logger.info("--- INICIO Endpoint /api/feedback ---")
     logger.info(f"Recibida solicitud de feedback RAW: {request}")
 
     id_consulta = request.id_consulta
@@ -863,7 +882,6 @@ async def handle_feedback(request: FeedbackRequest):
 
     if feedback_str not in ["me_gusta", "no_me_gusta"]:
         logger.warning(f"Valor de feedback no válido: {feedback_str} para id_consulta: {id_consulta}")
-        # Devolver un error HTTP claro pero no hacer que el servidor falle
         raise HTTPException(status_code=400, detail="Valor de feedback no válido. Use 'me_gusta' o 'no_me_gusta'.")
 
     # Mapear "me_gusta" a "si" y "no_me_gusta" a "no"
@@ -876,55 +894,124 @@ async def handle_feedback(request: FeedbackRequest):
         conn = get_admin_db_connection() 
         if not conn:
             logger.error(f"Fallo al conectar a la BD para feedback (id_consulta: {id_consulta})")
-            # No hacer un error HTTP 503 aquí, registrar y retornar un mensaje de error JSON amigable
-            # Ya que el usuario quiere que "no hacer un error"
-            # return {"status": "error_interno", "message": "Error de conexión a la base de datos.", "id_consulta": id_consulta}
-            # Sin embargo, para el frontend, un error HTTP sigue siendo la forma estándar de comunicar esto.
-            # El "no hacer un error" se interpretará como no crashear el servidor y loguear bien.
             raise HTTPException(status_code=503, detail="Error de conexión a la base de datos.")
 
         logger.info(f"Conexión a BD exitosa para feedback (id_consulta: {id_consulta})")
         cursor = conn.cursor()
-        db_type = os.getenv('DB_TYPE', 'sqlite')
+        
+        # Detectar el tipo de BD real basándose en la conexión, no en la variable de entorno
+        # Esto es importante porque DB_TYPE puede ser 'mysql' pero usar SQLite como fallback
+        db_type_real = "sqlite"  # Por defecto SQLite
+        try:
+            # Intentar detectar si es MySQL verificando el tipo de conexión
+            if hasattr(conn, 'server_version'):  # Atributo específico de pymysql
+                db_type_real = "mysql"
+            elif str(type(conn)).find('sqlite') != -1:  # Verificar si es SQLite
+                db_type_real = "sqlite"
+        except:
+            db_type_real = "sqlite"  # Fallback a SQLite
+            
+        logger.info(f"Tipo de BD real detectado: {db_type_real}")
 
-        sql_update_query = """
-            UPDATE consultas
-            SET respuesta_util = %s
-            WHERE id_consulta = %s
-        """
-        params_tuple = (respuesta_util_valor, id_consulta)
+        # Primero verificar si existe la consulta
+        if db_type_real == 'mysql':
+            check_query = "SELECT id_consulta FROM consultas WHERE id_consulta = %s"
+            cursor.execute(check_query, (id_consulta,))
+        else:  # sqlite
+            check_query = "SELECT id_consulta FROM consultas WHERE id_consulta = ?"
+            cursor.execute(check_query, (id_consulta,))
+        
+        existing_record = cursor.fetchone()
+        if not existing_record:
+            logger.warning(f"No se encontró consulta con id_consulta={id_consulta}")
+            raise HTTPException(status_code=404, detail=f"No se encontró la consulta con ID {id_consulta}.")
 
-        if db_type == 'sqlite':
-            sql_update_query = sql_update_query.replace('%s', '?')
+        logger.info(f"Consulta {id_consulta} encontrada, procediendo con el update")
+
+        # Realizar el UPDATE
+        if db_type_real == 'mysql':
+            sql_update_query = """
+                UPDATE consultas
+                SET respuesta_util = %s
+                WHERE id_consulta = %s
+            """
+            params_tuple = (respuesta_util_valor, id_consulta)
+        else:  # sqlite
+            sql_update_query = """
+                UPDATE consultas
+                SET respuesta_util = ?
+                WHERE id_consulta = ?
+            """
+            params_tuple = (respuesta_util_valor, id_consulta)
         
         logger.info(f"Ejecutando UPDATE para feedback (id_consulta: {id_consulta}): Query: {sql_update_query.strip()} con Params: {params_tuple}")
         cursor.execute(sql_update_query, params_tuple)
+        
+        # Para SQLite, verificar el número de filas afectadas
+        rows_affected = cursor.rowcount if hasattr(cursor, 'rowcount') else 1
+        logger.info(f"Filas afectadas por el UPDATE: {rows_affected}")
+        
         conn.commit()
         logger.info(f"Commit de la transacción realizado para feedback (id_consulta: {id_consulta})")
+
+        # Verificar que el update fue exitoso consultando el registro actualizado
+        if db_type_real == 'mysql':
+            verify_query = "SELECT respuesta_util FROM consultas WHERE id_consulta = %s"
+            cursor.execute(verify_query, (id_consulta,))
+        else:  # sqlite
+            verify_query = "SELECT respuesta_util FROM consultas WHERE id_consulta = ?"
+            cursor.execute(verify_query, (id_consulta,))
         
-        if cursor.rowcount == 0:
-            logger.warning(f"No se encontró consulta con id_consulta={id_consulta} para actualizar feedback. Filas afectadas: {cursor.rowcount}")
-            raise HTTPException(status_code=404, detail=f"No se encontró la consulta con ID {id_consulta}.")
+        updated_record = cursor.fetchone()
+        if updated_record:
+            if isinstance(updated_record, dict):  # MySQL
+                actual_value = updated_record['respuesta_util']
+            else:  # SQLite
+                actual_value = updated_record[0]
+            
+            logger.info(f"Verificación: respuesta_util actualizada a '{actual_value}' para id_consulta: {id_consulta}")
+            
+            if actual_value == respuesta_util_valor:
+                logger.info(f"Feedback actualizado correctamente para id_consulta: {id_consulta}")
+                return {
+                    "status": "success", 
+                    "message": "Gracias por tu opinión. Nos ayuda a mejorar!", 
+                    "id_consulta": id_consulta, 
+                    "respuesta_util_actualizada": respuesta_util_valor
+                }
+            else:
+                logger.error(f"Error: el valor no se actualizó correctamente. Esperado: {respuesta_util_valor}, Actual: {actual_value}")
+                raise HTTPException(status_code=500, detail="Error al actualizar el feedback en la base de datos.")
+        else:
+            logger.error(f"Error: no se pudo verificar la actualización para id_consulta: {id_consulta}")
+            raise HTTPException(status_code=500, detail="Error al verificar la actualización del feedback.")
 
-        logger.info(f"Feedback actualizado correctamente para id_consulta: {id_consulta}. Respuesta útil: {respuesta_util_valor}. Filas afectadas: {cursor.rowcount}")
-        return {"status": "success", "message": "Feedback registrado correctamente.", "id_consulta": id_consulta, "respuesta_util_actualizada": respuesta_util_valor}
-
-    except HTTPException as http_exc: # Re-lanzar HTTPExceptions conocidas
+    except HTTPException as http_exc:
         logger.error(f"HTTPException en /api/feedback (id_consulta: {id_consulta}): {http_exc.detail}")
         raise http_exc 
     except Exception as e:
         if conn:
             logger.info(f"Realizando rollback debido a excepción en /api/feedback (id_consulta: {id_consulta})")
-            conn.rollback() 
+            try:
+                conn.rollback()
+            except Exception as rollback_error:
+                logger.error(f"Error durante rollback: {rollback_error}")
+        
         logger.error(f"Error EXCEPCIÓN GENERAL al actualizar feedback para id_consulta {id_consulta}: {str(e)}")
-        logger.error(traceback.format_exc()) # Log completo del traceback
-        # Enviar un error HTTP genérico para no exponer detalles internos
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail="Error interno del servidor al procesar feedback.")
     finally:
         if conn:
-            conn.close()
+            try:
+                cursor.close()
+            except Exception as close_error:
+                logger.error(f"Error al cerrar cursor: {close_error}")
+            try:
+                conn.close()
+            except Exception as close_error:
+                logger.error(f"Error al cerrar conexión: {close_error}")
             logger.info(f"Conexión a BD (feedback) cerrada para id_consulta: {id_consulta}")
-        logger.info("--- FIN Endpoint /api/feedback ---") # Log de fin
+        logger.info("--- FIN Endpoint /api/feedback ---")
 
 # Clase para el formato de datos de estadísticas
 class EstadisticasResponse(BaseModel):
@@ -1406,6 +1493,10 @@ async def obtener_stats_diarias(
             else:  # SQLite
                 fecha = row[0]
                 cantidad = row[1]
+            
+            # Asegurar que la fecha sea un string en formato YYYY-MM-DD
+            if isinstance(fecha, (datetime.date, datetime.datetime)):
+                fecha = fecha.strftime('%Y-%m-%d')
             
             stats_diarias.append({
                 "fecha": fecha,

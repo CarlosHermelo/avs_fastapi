@@ -1,0 +1,329 @@
+<html><head>
+    <meta charset="utf-8"/>
+    <link crossorigin="" href="https://fonts.gstatic.com/" rel="preconnect"/>
+    <link as="style" href="https://fonts.googleapis.com/css2?display=swap&amp;family=Noto+Sans%3Awght%40400%3B500%3B700%3B900&amp;family=Public+Sans%3Awght%40400%3B500%3B600%3B700%3B800%3B900" onload="this.rel='stylesheet'" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet"/>
+    <title>Stitch Design</title>
+    <link href="data:image/x-icon;base64," rel="icon" type="image/x-icon"/>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <style>
+        .form-select {
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236B7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: right 0.5rem center;
+          background-size: 1.5em 1.5em;
+          -webkit-print-color-adjust: exact;
+          color-adjust: exact;
+          padding-right: 2.5rem;
+        }
+        .loading-spinner { 
+          display: none; 
+          text-align: center; 
+          padding: 20px; 
+        }
+        .loading-spinner::after {
+          content: ""; 
+          display: inline-block; 
+          width: 30px; 
+          height: 30px;
+          border: 4px solid rgba(22, 114, 206, 0.2); 
+          border-radius: 50%;
+          border-top-color: #1672ce; 
+          animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin { 
+          to { transform: rotate(360deg); } 
+        }
+        .error-message { 
+          color: #dc2626; 
+          font-weight: bold; 
+          margin-top: 15px; 
+          text-align: center; 
+          display: none;
+        }
+        .no-results { 
+          text-align: center; 
+          padding: 20px; 
+          font-style: italic; 
+          color: #64748b; 
+          display: none;
+        }
+        .char-limit { 
+          max-width: 250px; 
+          overflow: hidden; 
+          text-overflow: ellipsis; 
+          white-space: nowrap; 
+          cursor: help; 
+        }
+      </style>
+    </head>
+    <body class="bg-slate-50">
+    <div class="relative flex size-full min-h-screen flex-col group/design-root overflow-x-hidden" style='font-family: "Public Sans", "Noto Sans", sans-serif;'>
+    <div class="layout-container flex h-full grow flex-col">
+    <header class="flex items-center justify-between whitespace-nowrap border-b border-solid border-slate-200 bg-white px-6 py-3 shadow-sm">
+    <div class="flex items-center gap-3 text-slate-800">
+    <img src="pami.png" alt="PAMI" class="h-8 w-auto"/>
+    </div>
+    <h1 class="text-lg font-semibold text-slate-700">Monitoreo Asistente Virtual SIMAP</h1>
+    <div class="flex items-center gap-4">
+    <div class="text-right">
+    <p class="text-sm font-medium text-slate-800">ID Usuario: 321</p>
+    </div>
+    
+    </header>
+    <main class="flex-1 bg-slate-50 p-6 lg:p-10">
+    <div class="mx-auto max-w-7xl">
+    <div class="mb-8 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+    <h2 class="mb-6 text-xl font-semibold text-slate-800">Consultas de Preguntas </h2>
+    <div class="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 lg:grid-cols-5 items-end">
+    <label class="flex flex-col">
+    <p class="text-sm font-medium text-slate-700 pb-1.5">Fecha desde</p>
+    <input id="fecha_desde" class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" type="date" value=""/>
+    </label>
+    <label class="flex flex-col">
+    <p class="text-sm font-medium text-slate-700 pb-1.5">Fecha hasta</p>
+    <input id="fecha_hasta" class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" type="date" value=""/>
+    </label>
+    <label class="flex flex-col">
+    <p class="text-sm font-medium text-slate-700 pb-1.5">Sin datos</p>
+    <select id="respuesta_vacia" class="form-select flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
+    <option value="">Todos</option>
+    <option value="1">Sí</option>
+    <option value="0">No</option>
+    </select>
+    </label>
+    <label class="flex flex-col">
+    <p class="text-sm font-medium text-slate-700 pb-1.5">Utilidad</p>
+    <select id="respuesta_util" class="form-select flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
+    <option value="">Todos</option>
+    <option value="si">Útil</option>
+    <option value="no">No útil</option>
+    <option value="nada">Sin feedback</option>
+    </select>
+    </label>
+    <div class="flex flex-col justify-end">
+    <button onclick="aplicarFiltros()" class="flex min-w-[84px] items-center justify-center overflow-hidden rounded-md bg-[#1672ce] px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
+    <span class="material-icons mr-1 text-base">filter_alt</span>
+    <span class="truncate">Filtrar</span>
+    </button>
+    </div>
+    </div>
+    </div>
+
+    <div id="loadingSpinner" class="loading-spinner">Cargando datos...</div>
+    <div id="errorMessage" class="error-message"></div>
+    <div id="noResults" class="no-results">No se encontraron registros con los filtros aplicados.</div>
+
+    <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm @container">
+    <table class="min-w-full divide-y divide-slate-200">
+    <thead class="bg-slate-50">
+    <tr>
+    <th class="table-column-timestamp px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-slate-500">Timestamp</th>
+    <th class="table-column-id-usuario px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-slate-500">ID Usuario</th>
+    <th class="table-column-ugl px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-slate-500">UGL</th>
+    <th class="table-column-origen-pregunta px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-slate-500">Pregunta</th>
+    <th class="table-column-respuesta px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-slate-500">Respuesta</th>
+    <th class="table-column-sin-datos px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-slate-500">Sin datos (sí/no)</th>
+    <th class="table-column-utilidad px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-slate-500">Utilidad</th>
+    <th class="table-column-accion px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-slate-500">Acción</th>
+    </tr>
+    </thead>
+    <tbody id="tablaConsultasBody" class="divide-y divide-slate-200 bg-white">
+    <!-- Los datos se cargarán aquí dinámicamente -->
+    </tbody>
+    </table>
+    <div class="flex items-center justify-between border-t border-slate-200 bg-white px-4 py-3">
+    <p class="text-sm text-slate-700">Página <span class="font-medium">1</span></p>
+    <nav class="flex items-center space-x-2">
+    <button class="flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400" disabled="">1</button>
+    <button class="flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400">2</button>
+    <button class="flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400">
+                      Siguiente
+                      <span class="material-icons ml-1.5 text-base">arrow_forward</span>
+    </button>
+    </nav>
+    </div>
+    <style>
+                  @container (max-width: 900px) {
+                    .table-column-timestamp {
+                      display: none;
+                    }
+                  }
+                  @container (max-width: 800px) {
+                    .table-column-id-usuario {
+                      display: none;
+                    }
+                  }
+                  @container (max-width: 700px) {
+                    .table-column-ugl {
+                      display: none;
+                    }
+                  }
+                  @container (max-width: 600px) {
+                    .table-column-origen-pregunta {
+                      display: none;
+                    }
+                  }
+                  @container (max-width: 500px) {
+                    .table-column-respuesta {
+                      display: none;
+                    }
+                  }
+                  @container (max-width: 400px) {
+                    .table-column-sin-datos {
+                      display: none;
+                    }
+                  }
+                </style>
+    </div>
+    </div>
+    </main>
+    </div>
+    </div>
+
+    <script>
+        // Configuración del endpoint - Usar URL absoluta en lugar de relativa
+        const SERVER_URL = 'http://localhost:8000';  // Siempre usar localhost:8000
+
+        const API_ENDPOINT = `${SERVER_URL}/api/admin/consultas_filtradas`;
+        const API_ESTADISTICAS = `${SERVER_URL}/api/admin/estadisticas`;
+        const API_UGELS = `${SERVER_URL}/api/admin/ugels_disponibles`;
+
+        async function aplicarFiltros() {
+            const fechaDesde = document.getElementById('fecha_desde').value;
+            const fechaHasta = document.getElementById('fecha_hasta').value;
+            const respuestaVacia = document.getElementById('respuesta_vacia').value;
+            const respuestaUtil = document.getElementById('respuesta_util').value;
+
+            const spinner = document.getElementById('loadingSpinner');
+            const errorMessageDiv = document.getElementById('errorMessage');
+            const noResultsDiv = document.getElementById('noResults');
+            const tablaBody = document.getElementById('tablaConsultasBody');
+
+            spinner.style.display = 'block';
+            errorMessageDiv.style.display = 'none';
+            noResultsDiv.style.display = 'none';
+            tablaBody.innerHTML = ''; // Limpiar tabla anterior
+
+            let queryParams = new URLSearchParams();
+            if (fechaDesde) queryParams.append('fecha_desde', fechaDesde);
+            if (fechaHasta) queryParams.append('fecha_hasta', fechaHasta);
+            if (respuestaVacia !== "") queryParams.append('respuesta_es_vacia', respuestaVacia);
+            if (respuestaUtil !== "") queryParams.append('respuesta_util', respuestaUtil);
+
+            const apiUrl = `${API_ENDPOINT}?${queryParams.toString()}`;
+            console.log('DEBUG - URL de API a consultar:', apiUrl);
+
+            try {
+                console.log('DEBUG - Iniciando fetch a:', apiUrl);
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    },
+                });
+                console.log('DEBUG - Respuesta recibida, status:', response.status);
+                
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({detail: "Error desconocido del servidor."}));
+                    console.error('DEBUG - Error de respuesta:', response.status, errorData);
+                    throw new Error(`Error ${response.status}: ${errorData.detail || response.statusText}`);
+                }
+                
+                console.log('DEBUG - Procesando respuesta JSON');
+                const data = await response.json();
+                console.log('DEBUG - Datos recibidos:', data);
+
+                if (data.error) { // Error devuelto por la lógica del endpoint
+                    throw new Error(data.error);
+                }
+                
+                if (data.length === 0) {
+                    noResultsDiv.style.display = 'block';
+                } else {
+                    data.forEach(consulta => {
+                        const row = tablaBody.insertRow();
+                        
+                        // Timestamp
+                        const timestampCell = row.insertCell();
+                        timestampCell.className = 'table-column-timestamp whitespace-nowrap px-4 py-3 text-sm text-slate-600';
+                        timestampCell.textContent = new Date(consulta.timestamp).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'medium'});
+                        
+                        // ID Usuario
+                        const idUsuarioCell = row.insertCell();
+                        idUsuarioCell.className = 'table-column-id-usuario whitespace-nowrap px-4 py-3 text-sm text-slate-600';
+                        idUsuarioCell.textContent = consulta.id_usuario;
+                        
+                        // UGL
+                        const uglCell = row.insertCell();
+                        uglCell.className = 'table-column-ugl whitespace-nowrap px-4 py-3 text-sm text-slate-600';
+                        uglCell.textContent = consulta.ugel_origen;
+                        
+                        // Pregunta
+                        const preguntaCell = row.insertCell();
+                        preguntaCell.className = 'table-column-origen-pregunta whitespace-nowrap px-4 py-3 text-sm text-slate-600 char-limit';
+                        preguntaCell.textContent = consulta.pregunta_usuario_truncada;
+                        preguntaCell.title = consulta.pregunta_usuario_completa;
+
+                        // Respuesta
+                        const respuestaCell = row.insertCell();
+                        respuestaCell.className = 'table-column-respuesta whitespace-nowrap px-4 py-3 text-sm text-slate-600 char-limit';
+                        respuestaCell.textContent = consulta.respuesta_asistente_truncada;
+                        respuestaCell.title = consulta.respuesta_asistente_completa;
+
+                        // Sin datos
+                        const sinDatosCell = row.insertCell();
+                        sinDatosCell.className = 'table-column-sin-datos whitespace-nowrap px-4 py-3 text-sm text-slate-600';
+                        sinDatosCell.textContent = consulta.respuesta_es_vacia ? 'Sí' : 'No';
+                        
+                        // Utilidad
+                        const utilidadCell = row.insertCell();
+                        utilidadCell.className = 'table-column-utilidad whitespace-nowrap px-4 py-3 text-sm text-slate-600';
+                        
+                        if (consulta.respuesta_util === "si") {
+                            utilidadCell.innerHTML = '<span class="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">Útil</span>';
+                        } else if (consulta.respuesta_util === "no") {
+                            utilidadCell.innerHTML = '<span class="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800">No útil</span>';
+                        } else if (consulta.respuesta_util === "nada") {
+                            utilidadCell.innerHTML = '<span class="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800">Sin feedback</span>';
+                        } else {
+                            utilidadCell.innerHTML = '<span class="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800">Sin definir</span>';
+                        }
+                        
+                        // Acción
+                        const actionCell = row.insertCell();
+                        actionCell.className = 'table-column-accion whitespace-nowrap px-4 py-3 text-sm text-slate-600';
+                        const verButton = document.createElement('button');
+                        verButton.className = 'flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400';
+                        verButton.innerHTML = '<span class="material-icons mr-1 text-sm">visibility</span>Ver';
+                        verButton.onclick = function() { verDetalle(consulta.id_consulta, consulta); };
+                        actionCell.appendChild(verButton);
+                    });
+                }
+            } catch (error) {
+                console.error('DEBUG - Error en fetch:', error);
+                errorMessageDiv.textContent = "Error al cargar datos: " + error.message;
+                errorMessageDiv.style.display = 'block';
+            } finally {
+                spinner.style.display = 'none';
+            }
+        }
+
+        function verDetalle(idConsulta, consultaCompleta) {
+            // TODO: Implementar la lógica para mostrar más detalles.
+            // Por ejemplo, abrir un modal con toda la info, incluyendo pregunta_usuario_completa y respuesta_asistente_completa.
+            console.log('ID de consulta:', idConsulta);
+            console.log('Datos completos de la consulta:', consultaCompleta);
+            alert(`Acción "Ver" para la consulta ID: ${idConsulta}.\n\nPregunta: ${consultaCompleta.pregunta_usuario_completa}\n\nRespuesta: ${consultaCompleta.respuesta_asistente_completa}\n\n (Implementar modal o vista detallada)`);
+        }
+
+        // Cargar datos al iniciar la página para probar la funcionalidad 
+        window.onload = () => {
+            console.log('DEBUG - Página cargada, preparando para cargar datos automáticamente');
+            // Agregamos un pequeño delay para asegurarnos que la página haya terminado de cargar
+            setTimeout(aplicarFiltros, 500);
+        };
+    </script>
+    
+    </body></html>
