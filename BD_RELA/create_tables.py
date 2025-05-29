@@ -140,6 +140,10 @@ class Consulta(Base):
     tokens_output = Column(Integer)
     tiempo_respuesta_ms = Column(Integer)
     
+    # NUEVOS CAMPOS AGREGADOS
+    version_prompt = Column(String(100))  # Versión del prompt utilizado
+    comentario = Column(String(255))      # Campo para comentarios adicionales
+    
     # Estado de ejecución
     error_detectado = Column(Boolean, default=False)
     tipo_error = Column(String(100))
