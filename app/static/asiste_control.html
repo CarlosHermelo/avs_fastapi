@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="es"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Asistente Virtual SIMAP</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet"/>
+<style>
+    body {
+      font-family: 'Roboto', sans-serif;
+    }
+    .header {
+      background-color: #FFFFFF;
+      border-bottom: 1px solid #E0E0E0;
+    }
+    .footer {
+      background-color: #F5F5F5;
+      border-top: 1px solid #E0E0E0;
+    }
+    .chat-container {
+      background-color: #FFFFFF;
+      border-radius: 0.5rem;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }
+    .response-area {
+      min-height: 300px;
+      overflow-y: auto;
+      border: 1px solid #E0E0E0;
+      border-radius: 0.375rem;
+      padding: 1rem;
+      background-color: #F9FAFB;
+      white-space: pre-wrap;
+    }
+    .btn-primary {
+      background-color: #1E3A8A;color: white;
+    }
+    .btn-primary:hover {
+      background-color: #1D4ED8;
+    }
+    .btn-primary:disabled {
+      background-color: #9CA3AF;
+      cursor: not-allowed;
+    }
+    textarea, input[type="text"] {
+      border-radius: 0.375rem;
+      border: 1px solid #D1D5DB;
+      height: 100px;
+      resize: vertical;
+    }
+    .radio-label {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+    }
+    .radio-custom {
+      width: 1.25em;
+      height: 1.25em;
+      border: 2px solid #1E3A8A;
+      border-radius: 50%;
+      margin-right: 0.5em;
+      display: inline-block;
+      position: relative;
+    }
+    input[type="radio"]:checked + .radio-custom::after {
+      content: "";
+      width: 0.75em;
+      height: 0.75em;
+      background-color: #1E3A8A;
+      border-radius: 50%;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+    }
+    input[type="radio"] {
+      opacity: 0;
+      position: absolute;
+    }
+    .spinner {
+      display: none;
+      text-align: center;
+      margin: 20px 0;
+    }
+    .spinner::after {
+      content: "";
+      display: inline-block;
+      width: 24px;
+      height: 24px;
+      border: 3px solid rgba(30, 58, 138, 0.1);
+      border-radius: 50%;
+      border-top-color: #1E3A8A;
+      animation: spin 1s ease-in-out infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .error {
+      color: #EF4444;
+      font-weight: bold;
+      margin-top: 15px;
+      padding: 10px;
+      background-color: #FEF2F2;
+      border: 1px solid #FECACA;
+      border-radius: 0.375rem;
+    }
+    .metadata {
+      background-color: #F0F7FB;
+      border: 1px solid #D1FAE5;
+      border-radius: 0.375rem;
+      padding: 10px;
+      font-size: 0.9em;
+      color: #374151;
+      margin-bottom: 15px;
+      display: none; /* Ocultar metadatos */
+    }
+    .user-info-static {
+      background-color: #F0F7FB;
+      border-radius: 0.375rem;
+      padding: 10px;
+      font-size: 0.9em;
+      color: #374151;
+      margin-top: 10px;
+      display: none; /* Ocultar información del usuario */
+    }
+    .feedback-status {
+      margin-top: 10px;
+      font-style: italic;
+      color: #059669;
+      display: none;
+    }
+  </style>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+</head>
+<body class="bg-gray-100">
+    <header class="flex items-center justify-between whitespace-nowrap border-b border-solid border-slate-200 bg-white px-6 py-3 shadow-sm">
+        <div class="flex items-center gap-3 text-slate-800">
+        <img src="pami.png" alt="PAMI" class="h-8 w-auto"/>
+        </div>
+        <h1 class="text-lg font-semibold text-slate-700">Asistente Virtual SIMAP</h1>
+        <div class="flex items-center gap-4">
+        <div class="text-right">
+        <p class="text-sm font-medium text-slate-800">ID Usuario: 321</p>
+        </div>
+        
+        </header>     
+<main class="container mx-auto mt-8 p-6">
+<div class="chat-container max-w-3xl mx-auto p-6">
+<h2 class="text-lg font-medium text-center text-gray-700 mb-6">Consulta de Servicios SIMAP</h2>
+
+<form id="questionForm">
+<div class="mb-4">
+<label class="block text-sm font-medium text-gray-700 mb-1" for="pregunta">Ingresá tu pregunta:</label>
+<textarea class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500" id="pregunta" name="pregunta" required placeholder="Ingrese su pregunta..."></textarea>
+
+<div class="flex justify-end mt-3">
+<button class="btn-primary py-2 px-4 rounded-md flex items-center" type="submit" id="enviarBtn">
+<span class="material-icons mr-2 text-sm">send</span>
+Enviar
+</button>
+</div>
+</div>
+</form>
+
+<div id="spinner" class="spinner"></div>
+<div id="error" class="error" style="display: none;"></div>
+
+<div id="responseContainer" style="display: none;">
+<div id="metadata" class="metadata"></div>
+
+<div class="mb-4">
+<label class="block text-sm font-medium text-gray-700 mb-1">Respuesta:</label>
+<div class="response-area text-sm text-gray-800" id="response">
+<!-- La respuesta se mostrará aquí dinámicamente -->
+</div>
+</div>
+
+<div class="feedback-container">
+<p class="text-sm font-medium text-gray-700 mb-2">¿Te resultó útil la respuesta?</p>
+<div class="flex items-center space-x-4">
+<label class="radio-label text-sm text-gray-700" for="util-si">
+<input class="mr-2" id="util-si" name="utilidad" type="radio" value="me_gusta"/>
+<span class="radio-custom"></span>
+Sí
+</label>
+<label class="radio-label text-sm text-gray-700" for="util-no">
+<input class="mr-2" id="util-no" name="utilidad" type="radio" value="no_me_gusta"/>
+<span class="radio-custom"></span>
+No
+</label>
+</div>
+<div id="feedbackStatus" class="feedback-status">Feedback enviado correctamente</div>
+
+<!-- Sección de comentarios -->
+<div class="mt-4">
+<p class="text-sm font-medium text-gray-700 mb-2">Agregar comentario (opcional):</p>
+<div class="flex items-start space-x-2">
+<textarea 
+    id="comentarioTexto" 
+    class="flex-1 p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 text-sm resize-vertical" 
+    rows="3" 
+    maxlength="255"
+    placeholder="Escriba su comentario aquí..." 
+    disabled>
+</textarea>
+<button 
+    id="enviarComentarioBtn" 
+    class="btn-primary py-2 px-4 rounded-md flex items-center text-sm whitespace-nowrap" 
+    type="button"
+    disabled>
+    <span class="material-icons mr-1 text-sm">comment</span>
+    Enviar
+</button>
+</div>
+<div class="text-xs text-gray-500 mt-1">Máximo 255 caracteres</div>
+<div id="comentarioStatus" class="feedback-status">Comentario guardado correctamente</div>
+</div>
+</div>
+
+</div>
+</main>
+<footer class="footer py-4 mt-12">
+<div class="container mx-auto text-center text-sm text-gray-600">
+      © 2023 Asistente Virtual SIMAP. Todos los derechos reservados.
+    </div>
+</footer>
+
+<script>
+        // Variable global para almacenar el id_consulta actual
+        let currentConsultaId = null; 
+
+        document.getElementById('questionForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const question = document.getElementById('pregunta').value;
+            const id_usuario = 321;
+            const ugel_origen = "Formosa";
+            const enviarBtn = document.getElementById('enviarBtn');
+            
+            // Mostrar spinner y ocultar elementos
+            document.getElementById('spinner').style.display = 'block';
+            document.getElementById('responseContainer').style.display = 'none';
+            document.getElementById('error').style.display = 'none';
+            enviarBtn.disabled = true;
+            currentConsultaId = null; // Limpiar ID de consulta anterior
+            
+            try {
+                const response = await fetch('http://localhost:8000/api/complete_analysis', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        question_input: question,
+                        id_usuario: id_usuario,
+                        ugel_origen: ugel_origen
+                    })
+                });
+                
+                if (!response.ok) {
+                    // Intentar obtener el cuerpo del error para más detalles
+                    let errorDetail = `Error en la solicitud: ${response.status} ${response.statusText}`;
+                    try {
+                        const errorData = await response.json();
+                        errorDetail = errorData.detail || errorDetail;
+                        currentConsultaId = errorData.metadata?.id_consulta; // Intentar obtener ID de consulta incluso en error
+                    } catch (e) { /* No hacer nada si el cuerpo del error no es JSON */ }
+                    throw new Error(errorDetail);
+                }
+                
+                const data = await response.json();
+                
+                document.getElementById('response').textContent = data.answer;
+                
+                const metadata = data.metadata;
+                currentConsultaId = metadata.id_consulta; 
+                console.log("ID de Consulta recibido:", currentConsultaId);
+
+                // Los metadatos están ocultos por CSS, pero aún se procesan para funcionalidad
+                document.getElementById('metadata').innerHTML = `
+                    <strong>ID Consulta:</strong> ${currentConsultaId || 'No disponible'}<br>
+                    <strong>Modelo:</strong> ${metadata.model || 'No disponible'}<br>
+                    <strong>Documentos recuperados:</strong> ${metadata.document_count || 0}<br>
+                    <strong>Periodo consultado:</strong> ${metadata.fecha_desde || 'N/A'} a ${metadata.fecha_hasta || 'N/A'}<br>
+                    <strong>Usuario:</strong> ${id_usuario} | <strong>UGL:</strong> ${ugel_origen}
+                `;
+                
+                document.getElementById('responseContainer').style.display = 'block';
+                
+                // Limpiar y habilitar los radio buttons de feedback
+                const feedbackRadios = document.querySelectorAll('input[name="utilidad"]');
+                feedbackRadios.forEach(radio => {
+                    radio.checked = false;
+                    radio.disabled = !currentConsultaId; // Deshabilitar si no hay ID de consulta
+                });
+                document.getElementById('feedbackStatus').style.display = 'none';
+                
+                // Habilitar/deshabilitar textarea y botón de comentarios
+                const comentarioTexto = document.getElementById('comentarioTexto');
+                const enviarComentarioBtn = document.getElementById('enviarComentarioBtn');
+                
+                comentarioTexto.disabled = !currentConsultaId;
+                enviarComentarioBtn.disabled = !currentConsultaId;
+                comentarioTexto.value = ''; // Limpiar textarea
+                document.getElementById('comentarioStatus').style.display = 'none';
+                
+            } catch (error) {
+                const errorDiv = document.getElementById('error');
+                errorDiv.textContent = error.message;
+                errorDiv.style.display = 'block';
+                
+                // Asegurarse de que los botones de feedback estén deshabilitados si falló la obtención de ID
+                const feedbackRadios = document.querySelectorAll('input[name="utilidad"]');
+                feedbackRadios.forEach(radio => {
+                    radio.disabled = true;
+                });
+                
+                // También deshabilitar controles de comentarios
+                document.getElementById('comentarioTexto').disabled = true;
+                document.getElementById('enviarComentarioBtn').disabled = true;
+            } finally {
+                document.getElementById('spinner').style.display = 'none';
+                enviarBtn.disabled = false;
+            }
+        });
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            const feedbackRadios = document.querySelectorAll('input[name="utilidad"]');
+            
+            feedbackRadios.forEach(radio => {
+                radio.addEventListener('change', async function() {
+                    if (!currentConsultaId) {
+                        console.error('Error: id_consulta no está disponible para enviar feedback.');
+                        const errorDiv = document.getElementById('error');
+                        errorDiv.textContent = 'Error: No se puede enviar feedback, ID de consulta no encontrado.';
+                        errorDiv.style.display = 'block';
+                        // Mantener los radios deshabilitados
+                        feedbackRadios.forEach(r => r.disabled = true);
+                        return;
+                    }
+
+                    const feedbackValue = this.value; 
+                    feedbackRadios.forEach(r => r.disabled = true);
+
+                    try {
+                        const feedbackResponse = await fetch('http://localhost:8000/api/feedback', { 
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                id_consulta: currentConsultaId,
+                                feedback_value: feedbackValue
+                            })
+                        });
+                        
+                        const feedbackResponseData = await feedbackResponse.json();
+
+                        if (!feedbackResponse.ok) {
+                            throw new Error(feedbackResponseData.detail || 'Error al enviar feedback');
+                        }
+                        
+                        const feedbackStatus = document.getElementById('feedbackStatus');
+                        feedbackStatus.textContent = feedbackResponseData.message || 'Feedback enviado correctamente';
+                        feedbackStatus.style.display = 'block';
+                        
+                    } catch (error) {
+                        console.error('Error enviando feedback:', error);
+                        const errorDiv = document.getElementById('error');
+                        errorDiv.textContent = 'Error al enviar feedback: ' + error.message;
+                        errorDiv.style.display = 'block';
+                        
+                        // Re-habilitar en caso de error para que el usuario pueda intentarlo de nuevo
+                        // solo si currentConsultaId sigue siendo válido.
+                        if (currentConsultaId) {
+                            feedbackRadios.forEach(r => r.disabled = false);
+                        }
+                    }
+                });
+            });
+            
+            // Event listener para el botón de enviar comentario
+            document.getElementById('enviarComentarioBtn').addEventListener('click', async function() {
+                if (!currentConsultaId) {
+                    console.error('Error: id_consulta no está disponible para enviar comentario.');
+                    const errorDiv = document.getElementById('error');
+                    errorDiv.textContent = 'Error: No se puede enviar comentario, ID de consulta no encontrado.';
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+
+                const comentarioTexto = document.getElementById('comentarioTexto').value.trim();
+                
+                if (!comentarioTexto) {
+                    const errorDiv = document.getElementById('error');
+                    errorDiv.textContent = 'Por favor, escriba un comentario antes de enviar.';
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+
+                if (comentarioTexto.length > 255) {
+                    const errorDiv = document.getElementById('error');
+                    errorDiv.textContent = 'El comentario no puede exceder 255 caracteres.';
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+
+                // Deshabilitar controles mientras se envía
+                const enviarComentarioBtn = document.getElementById('enviarComentarioBtn');
+                const comentarioTextarea = document.getElementById('comentarioTexto');
+                
+                enviarComentarioBtn.disabled = true;
+                comentarioTextarea.disabled = true;
+                
+                // Ocultar mensajes previos
+                document.getElementById('error').style.display = 'none';
+                document.getElementById('comentarioStatus').style.display = 'none';
+
+                try {
+                    const comentarioResponse = await fetch('http://localhost:8000/api/comentario', { 
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            id_consulta: currentConsultaId,
+                            comentario: comentarioTexto
+                        })
+                    });
+                    
+                    const comentarioResponseData = await comentarioResponse.json();
+
+                    if (!comentarioResponse.ok) {
+                        throw new Error(comentarioResponseData.detail || 'Error al enviar comentario');
+                    }
+                    
+                    // Mostrar mensaje de éxito
+                    const comentarioStatus = document.getElementById('comentarioStatus');
+                    comentarioStatus.textContent = comentarioResponseData.message || 'Comentario guardado correctamente';
+                    comentarioStatus.style.display = 'block';
+                    
+                    // Limpiar el textarea después del envío exitoso
+                    comentarioTextarea.value = '';
+                    
+                } catch (error) {
+                    console.error('Error enviando comentario:', error);
+                    const errorDiv = document.getElementById('error');
+                    errorDiv.textContent = 'Error al enviar comentario: ' + error.message;
+                    errorDiv.style.display = 'block';
+                } finally {
+                    // Re-habilitar controles
+                    if (currentConsultaId) {
+                        enviarComentarioBtn.disabled = false;
+                        comentarioTextarea.disabled = false;
+                    }
+                }
+            });
+        });
+</script>
+
+</body></html>

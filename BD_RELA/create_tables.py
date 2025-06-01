@@ -123,8 +123,9 @@ class Consulta(Base):
     id_consulta = Column(Integer, primary_key=True, autoincrement=True)
     timestamp = Column(DateTime, nullable=False, default=datetime.now)
     
-    # Información del usuario
-    id_usuario = Column(Integer, ForeignKey("usuarios.id_usuario"), nullable=False)
+    # Información del usuario - SIN FOREIGN KEY CONSTRAINT
+    # Los datos vienen directamente del HTML y no necesitan validación en BD
+    id_usuario = Column(Integer, nullable=False)  # Eliminada ForeignKey("usuarios.id_usuario")
     ugel_origen = Column(String(100))
     
     # Contenido de la interacción
@@ -134,8 +135,8 @@ class Consulta(Base):
     # En SQLite no hay ENUM, así que usamos String
     respuesta_util = Column(String(15), default="sin feedback")
     
-    # Información técnica
-    id_prompt_usado = Column(Integer, ForeignKey("prompts.id_prompt"))
+    # Información técnica - SIN FK con prompts para simplificar
+    id_prompt_usado = Column(String(100))  # Cambiado a String para almacenar nombre/id sin FK
     tokens_input = Column(Integer)
     tokens_output = Column(Integer)
     tiempo_respuesta_ms = Column(Integer)
@@ -153,24 +154,26 @@ class Consulta(Base):
     origen_canal = Column(String(50))
     modelo_llm_usado = Column(String(100))
     
-    # Relaciones
-    usuario = relationship("Usuario")
-    prompt = relationship("Prompt")
+    # Relaciones - ELIMINADAS para evitar foreign keys
+    # usuario = relationship("Usuario")  # ELIMINADO
+    # prompt = relationship("Prompt")    # ELIMINADO
 
 class FeedbackRespuesta(Base):
     __tablename__ = "feedback_respuesta"
     
     id_feedback = Column(Integer, primary_key=True, autoincrement=True)
     id_consulta = Column(Integer, ForeignKey("consultas.id_consulta"), nullable=False)
-    id_usuario = Column(Integer, ForeignKey("usuarios.id_usuario"), nullable=False)
+    # Información del usuario - SIN FOREIGN KEY CONSTRAINT
+    # Los datos vienen directamente del HTML y no necesitan validación en BD
+    id_usuario = Column(Integer, nullable=False)  # Eliminada ForeignKey("usuarios.id_usuario")
     # En SQLite no hay ENUM, así que usamos String
     utilidad_respuesta = Column(String(10))
     comentario = Column(Text)
     fecha = Column(DateTime, default=datetime.now)
     
-    # Relaciones
+    # Relaciones - SOLO con consultas, no con usuarios
     consulta = relationship("Consulta")
-    usuario = relationship("Usuario")
+    # usuario = relationship("Usuario")  # ELIMINADO
 
 class LogBatchBDV(Base):
     __tablename__ = "log_batch_bdv"

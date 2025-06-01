@@ -146,6 +146,10 @@
                 <p id="totalRegistros">0</p>
             </div>
             <div class="stat-box">
+                <h3>Promedio de Respuestas</h3>
+                <p id="promedioRespuesta">0 ms</p>
+            </div>
+            <div class="stat-box">
                 <h3>Total de Tokens</h3>
                 <p id="totalTokens">0</p>
             </div>
@@ -220,7 +224,26 @@
                     const outTok = Number(item.tokens_output) || 0;
                     return sum + inTok + outTok;
                 }, 0);
-                document.getElementById('totalTokens').textContent = 18276;
+                document.getElementById('totalTokens').textContent = totalTokens;
+
+                // Calcular promedio de tiempo de respuesta (solo registros válidos)
+                const tiemposValidos = data.filter(item => {
+                    const tiempo = Number(item.tiempo_respuesta_ms);
+                    return tiempo && tiempo > 0; // Solo tiempos mayores a cero y no nulos
+                });
+                
+                const promedioTiempo = tiemposValidos.length > 0 ? 
+                    tiemposValidos.reduce((sum, item) => {
+                        const tiempo = Number(item.tiempo_respuesta_ms);
+                        return sum + tiempo;
+                    }, 0) / tiemposValidos.length : 0;
+                
+                // Formatear el promedio con dos decimales y agregar unidad
+                const promedioFormateado = promedioTiempo > 1000 ? 
+                    `${(promedioTiempo / 1000).toFixed(2)} s` : 
+                    `${Math.round(promedioTiempo)} ms`;
+                    
+                document.getElementById('promedioRespuesta').textContent = promedioFormateado;
 
                 // Procesar datos para los gráficos existentes
                 const respuestaVaciaStats = data.reduce((acc, item) => {

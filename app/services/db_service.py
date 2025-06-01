@@ -24,6 +24,8 @@ def persistir_consulta(
     tokens_input,
     tokens_output,
     tiempo_respuesta_ms,
+    id_prompt_usado=None,
+    comentario=None,
     error_detectado=False,
     tipo_error=None,
     mensaje_error=None,
@@ -44,6 +46,8 @@ def persistir_consulta(
         tokens_input (int): Número de tokens usados en el prompt (ya calculado)
         tokens_output (int): Número de tokens generados en la respuesta (ya calculado)
         tiempo_respuesta_ms (int): Tiempo en ms para generar la respuesta
+        id_prompt_usado (int): ID del prompt utilizado
+        comentario (str): Comentario adicional sobre la consulta
         error_detectado (bool): Si ocurrió un error técnico
         tipo_error (str): Tipo de error si hubo alguno
         mensaje_error (str): Mensaje de error detallado
@@ -61,10 +65,11 @@ def persistir_consulta(
         "respuesta_asistente": respuesta_asistente,
         "respuesta_es_vacia": len(respuesta_asistente or "") < 150,
         "respuesta_util": "nada", # Valor inicial para todas las consultas
-        "id_prompt_usado": 1,
+        "id_prompt_usado": id_prompt_usado if id_prompt_usado is not None else 1,
         "tokens_input": tokens_input,
         "tokens_output": tokens_output,
         "tiempo_respuesta_ms": tiempo_respuesta_ms,
+        "comentario": comentario,
         "error_detectado": error_detectado,
         "tipo_error": tipo_error,
         "mensaje_error": mensaje_error,
@@ -128,6 +133,8 @@ def persistir_consulta(
             tokens_input=datos_a_insertar["tokens_input"],
             tokens_output=datos_a_insertar["tokens_output"],
             tiempo_respuesta_ms=datos_a_insertar["tiempo_respuesta_ms"],
+            version_prompt=None,  # No usamos más este campo, usamos id_prompt_usado
+            comentario=datos_a_insertar["comentario"],
             error_detectado=datos_a_insertar["error_detectado"],
             tipo_error=datos_a_insertar["tipo_error"],
             mensaje_error=datos_a_insertar["mensaje_error"],

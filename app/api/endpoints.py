@@ -4,6 +4,9 @@ from app.models.schemas import QuestionRequest, AnswerResponse, CompleteAnalysis
 from app.services.process_question import process_question, retrieve_stats
 from app.services.token_utils import contar_tokens, count_words, validar_palabras, reducir_contenido_por_palabras
 from app.services.db_service import persistir_consulta
+from app.services.prompt_service import get_system_prompt  # Nueva importación
+# Importar funciones de health check
+from app.api.health_check import health_check_endpoint, health_check_json
 import json
 import os
 import configparser
@@ -31,106 +34,39 @@ logger = get_logger()
 
 router = APIRouter(prefix="/api")
 
-# Definición de la constante para el prompt base del sistema
-SISTEMA_PROMPT_BASE = """
-<CONTEXTO>
-La información proporcionada tiene como objetivo apoyar a los agentes que trabajan en las agencias de PAMI, quienes se encargan de atender las consultas de los afiliados. Este soporte está diseñado para optimizar la experiencia de atención al público y garantizar que los afiliados reciban información confiable y relevante en el menor tiempo posible.
-</CONTEXTO>
+# Variable global para almacenar el ID del prompt actual
+current_prompt_id = None
 
-<ROL>
- Eres un asistente virtual experto en los servicios y trámites de PAMI.
-</ROL>
-<TAREA>
-   Tu tarea es responder preguntas relacionadas con lo trámites y servicios que ofrece la obra social PAMI, basándote únicamente en los datos disponibles en la base de datos vectorial. Si la información no está disponible, debes decir 'No tengo esa información en este momento'.
-</TAREA>
-<REGLAS_CRÍTICAS>
-- **PROHIBIDO hacer inferencias, generalizaciones, deducciones o suposiciones sobre trámites, renovaciones, requisitos o períodos.**
-- Si no existe una afirmación explícita, clara y literal en el contexto, responde exactamente: **"No tengo la informacion suficiente del SIMAP para responderte en forma precisa tu pregunta."**
-- Cada afirmación incluida en tu respuesta debe tener respaldo textual directo en el contexto.
-</REGLAS_CRÍTICAS>
-<MODO_RESPUESTA>
-<EXPLICACIÓN>
-En tu respuesta debes:
-Ser breve y directa: Proporciona la información en un formato claro y conciso, enfocándote en los pasos esenciales o la acción principal que debe tomarse.
-Ser accionable: Prioriza el detalle suficiente para que el agente pueda transmitir la solución al afiliado rápidamente o profundizar si es necesario.
-
-Evitar información innecesaria: Incluye solo los datos más relevantes para resolver la consulta. Si hay pasos opcionales o detalles adicionales, indícalos solo si son críticos.
-Estructura breve: Usa puntos clave, numeración o listas de una sola línea si es necesario.
-
-</EXPLICACION> 
-   <EJEMPLO_MODO_RESPUESTA>
-      <PREGUNTA>
-         ¿Cómo tramitar la insulina tipo glargina?
-      </PREGUNTA>
-      <RESPUESTA>
-         PAMI cubre al 100% la insulina tipo Glargina para casos especiales, previa autorización por vía de excepción. Para gestionarla, se debe presentar el Formulario de Insulinas por Vía de Excepción (INICIO o RENOVACIÓN) firmado por el médico especialista, acompañado de los últimos dos análisis de sangre completos (hemoglobina glicosilada y glucemia, firmados por un bioquímico), DNI, credencial de afiliación y receta electrónica. La solicitud se presenta en la UGL o agencia de PAMI y será evaluada por Nivel Central en un plazo de 72 horas. La autorización tiene una vigencia de 12 meses.
-      </RESPUESTA>
-   </EJEMPLO_MODO_RESPUESTA>
-</MODO_RESPUESTA>
-
-<CASOS_DE_PREGUNTA_RESPUESTA>
-        <REQUISITOS>
-        Si la respuesta tiene requisitos listar **TODOS** los requisitos encontrados en el contexto no omitas      incluso si aparecen en chunks distintos o al final de un fragmento. 
-**Ejemplo crítico**: Si un chunk menciona "DNI, recibo, credencial" y otro agrega "Boleta de luz ", DEBEN incluirse ambos.
-                             
-         **Advertencia**:
-          Si faltan requisitos del contexto en tu respuesta, se considerará ERROR GRAVE.                         
-        </REQUISITOS>
-       
-   <IMPORTANTES_Y_EXCEPCIONES>
-      Si los servicios o trámites tienen EXCEPCIONES, aclaraciones o detalles IMPORTANTES, EXCLUSIONES, menciónalos en tu respuesta.
-        <EJEMPLO>
-           ### Exclusiones:
-            Afiliados internados en geriaticos privados
-           ### Importante
-            La orden tiene un vencimiento de 90 dias
-           ### Excepciones
-            Las solicitudes por vulnerabilidad no tendrán vencimiento
-        </EJEMPLO>                      
-   </IMPORTANTES_Y_EXCEPCIONES>
-
-   <TRAMITES_NO_DISPONIBLES>
-      <EXPLICACION>
-         Si la pregunta es sobre un trámite o servicio que no está explícitamente indicado en la base de datos vectorial, menciona que no existe ese trámite o servicio.
-      </EXPLICACION>
-      <EJEMPLO>
-         <PREGUNTA>
-            ¿Cómo puede un afiliado solicitar un descuento por anteojos?
-         </PREGUNTA>
-         <RESPUESTA>
-            PAMI no brinda un descuento por anteojos,Por lo tanto, si el afiliado decide comprar los anteojos por fuera de la red de ópticas de PAMI, no será posible solicitar un reintegro.
-         </RESPUESTA>
-      </EJEMPLO>
-   </TRAMITES_NO_DISPONIBLES>
-
-   <CALCULOS_NUMERICOS>
-      <EXPLICACION>
-         Si la pregunta involucra un cálculo o comparación numérica, evalúa aritméticamente para responderla.
-      </EXPLICACION>
-      <EJEMPLO>
-         - Si se dice "menor a 10", es un número entre 1 y 9.
-         - Si se dice "23", es un número entre 21 y 24.
-      </EJEMPLO>
-   </CALCULOS_NUMERICOS>
-
-   <FORMATO_RESPUESTA>
-      <EXPLICACION>
-         Presenta la información en formato de lista Markdown si es necesario.
-      </EXPLICACION>
-   </FORMATO_RESPUESTA>
-
-   <REFERENCIAS>
-      <EXPLICACION>
-         Al final de tu respuesta, incluye siempre un apartado titulado **Referencias** que contenga combinaciones únicas de **ID_SUB** y **SUBTIPO**, más un link con la siguiente estructura:
-      </EXPLICACION>
-      <EJEMPLO>
-         Referencias:
-         - ID_SUB = 347 | SUBTIPO = 'Traslados Programados'
-         - LINK = https://simap.pami.org.ar/subtipo_detalle.php?id_sub=347
-      </EJEMPLO>
-   </REFERENCIAS>
-</CASOS_DE_PREGUNTA_RESPUESTA>
-"""
+# Función para obtener el prompt del sistema dinámicamente
+def get_sistema_prompt_base():
+    """
+    Obtiene el prompt base del sistema desde la base de datos con fallbacks.
+    Registra en el log de dónde se obtuvo el prompt.
+    Retorna una tupla (prompt_content, prompt_id).
+    """
+    global current_prompt_id
+    
+    try:
+        prompt_content, source, prompt_id = get_system_prompt()
+        
+        # Almacenar el ID globalmente
+        current_prompt_id = prompt_id
+        
+        # Registrar en el log la fuente del prompt y su ID
+        if source == "base_de_datos":
+            logger.info(f"PROMPT_LOADED: Prompt cargado desde base de datos - ID: {prompt_id}")
+        elif source == "archivo_txt":
+            logger.info(f"PROMPT_LOADED: Prompt cargado desde archivo {prompt_id}")
+        elif source == "constante_hardcodeada":
+            logger.warning("PROMPT_LOADED: Prompt cargado desde constante hardcodeada (fallback final)")
+        
+        return prompt_content, prompt_id
+        
+    except Exception as e:
+        logger.error(f"Error al obtener prompt del sistema: {e}")
+        logger.warning("PROMPT_LOADED: Usando prompt hardcodeado de emergencia debido a error")
+        current_prompt_id = "emergency_fallback"
+        return "Hola, soy tu asistente. ¿En qué puedo ayudarte?", "emergency_fallback"
 
 @router.post("/process_question", response_model=AnswerResponse)
 def handle_question(request: QuestionRequest):
@@ -170,6 +106,7 @@ def log_token_summary(tokens_entrada, tokens_salida, modelo):
     log_message("RESUMEN DE CONTEO DE TOKENS (Qdrant)")
     log_message(f"Fecha y hora: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     log_message(f"Modelo: {modelo}")
+    log_message(f"Versión del prompt: {current_prompt_id if current_prompt_id else 'No disponible'}")
     log_message(separador)
     log_message(f"FRAGMENTOS RECUPERADOS DE LA BD VECTORIAL QDRANT: {cantidad_fragmentos}")
     log_message(f"TOKENS DE ENTRADA (pregunta + contexto): {tokens_entrada}")
@@ -193,6 +130,7 @@ def log_token_summary(tokens_entrada, tokens_salida, modelo):
     resumen_json = {
         "timestamp": datetime.datetime.now().isoformat(),
         "model": modelo,
+        "prompt_id": current_prompt_id,
         "fragments_count": cantidad_fragmentos,
         "input_tokens": tokens_entrada,
         "output_tokens": tokens_salida,
@@ -355,7 +293,7 @@ async def handle_complete_analysis(
                 log_message("No se encontraron términos de la pregunta en los documentos, enviando respuesta genérica.")
                 return {"messages": [{"role": "assistant", "content": "Lo siento, no tengo información suficiente para responder esa pregunta."}]}
             
-            system_message_content = SISTEMA_PROMPT_BASE + docs_content
+            system_message_content = get_sistema_prompt_base()[0] + docs_content
        
             # Validar si excede el límite de palabras
             es_valido, num_palabras = validar_palabras(system_message_content)
@@ -363,7 +301,7 @@ async def handle_complete_analysis(
             
             if not es_valido:
                 # Reducir el contenido si es necesario
-                system_message_content = reducir_contenido_por_palabras(SISTEMA_PROMPT_BASE + docs_content) # Asegurarse que se usa la base + docs para reducir
+                system_message_content = reducir_contenido_por_palabras(get_sistema_prompt_base()[0] + docs_content) # Asegurarse que se usa la base + docs para reducir
                 log_message(f"Se ha reducido el contenido a {count_words(system_message_content)} palabras.")
                 log_message(f"WEB-CONTEXTO_QUEDO RESUMIDO ASI (system_message_content\n): {system_message_content[:1000]}... (truncado)")
             
@@ -502,7 +440,7 @@ Pregunta: {request.question_input}
             end_time = datetime.datetime.now()
             processing_time = (end_time - start_time).total_seconds()
             tiempo_respuesta_ms = int(processing_time * 1000)
-            log_message(f"Tiempo total de procesamiento: {processing_time:.2f} segundos")
+            log_message(f"TIEMPO RESPUESTA: {processing_time:.2f} segundos ({tiempo_respuesta_ms} ms)")
             
             # CÁLCULO ÚNICO DE TOKENS - Hacerlo una sola vez aquí
             # 1. Tokens de la pregunta del usuario
@@ -510,8 +448,8 @@ Pregunta: {request.question_input}
             log_message(f"Tokens de la pregunta del usuario (question_with_context): {tokens_pregunta_usuario}")
 
             # 2. Tokens del prompt base del sistema
-            tokens_prompt_sistema_base = contar_tokens(SISTEMA_PROMPT_BASE, model_name)
-            log_message(f"Tokens del prompt base del sistema (SISTEMA_PROMPT_BASE): {tokens_prompt_sistema_base}")
+            tokens_prompt_sistema_base = contar_tokens(get_sistema_prompt_base()[0], model_name)
+            log_message(f"Tokens del prompt base del sistema (get_sistema_prompt_base): {tokens_prompt_sistema_base}")
 
             # 3. Tokens del contexto recuperado (docs_content)
             # Extraer docs_content del último estado del grafo (last_step)
@@ -551,6 +489,11 @@ Pregunta: {request.question_input}
             log_message(f"##############-------FIN COMPLETE_ANALYSIS (Qdrant)----------#####################")
             log_message("="*80)
             
+            # Agregar versión del prompt al final de la respuesta
+            if current_prompt_id:
+                response_content += f"\nvp:{current_prompt_id}"
+                log_message(f"Versión del prompt agregada a la respuesta: {current_prompt_id}")
+            
             # Persistir en base de datos con los mismos valores calculados
             try:
                 # Parámetros para la función persistir_consulta
@@ -562,6 +505,8 @@ Pregunta: {request.question_input}
                     tokens_input=tokens_entrada,  # Usar el valor calculado
                     tokens_output=tokens_salida,  # Usar el valor calculado
                     tiempo_respuesta_ms=tiempo_respuesta_ms,
+                    id_prompt_usado=current_prompt_id,  # Usar ID del prompt en lugar de versión
+                    comentario=None,  # Por ahora sin comentario
                     error_detectado=False,
                     modelo_llm_usado=model_name
                 )
@@ -596,10 +541,16 @@ Pregunta: {request.question_input}
             end_time = datetime.datetime.now()
             processing_time = (end_time - start_time).total_seconds() if 'start_time' in locals() else 0
             tiempo_respuesta_ms = int(processing_time * 1000)
+            log_message(f"TIEMPO RESPUESTA (ERROR): {processing_time:.2f} segundos ({tiempo_respuesta_ms} ms)")
             
             # Preparar mensaje de error
             error_message = f"Lo siento, ocurrió un error al procesar tu solicitud: {str(e)}"
             response_content = "Lo siento, ocurrió un error en el servidor. Por favor, intenta nuevamente más tarde."
+            
+            # Agregar versión del prompt al final de la respuesta de error
+            if current_prompt_id:
+                response_content += f"\nvp:{current_prompt_id}"
+                log_message(f"Versión del prompt agregada a la respuesta de error: {current_prompt_id}")
             
             # CÁLCULO ÚNICO DE TOKENS EN CASO DE ERROR (también necesita revisión)
             tokens_entrada_error = 0 # Renombrar para evitar colisión con el caso exitoso
@@ -616,13 +567,11 @@ Pregunta: {request.question_input}
             # Por simplicidad y consistencia con la idea de que el LLM no procesó el contexto completo,
             # podríamos omitir los tokens del sistema y del contexto para el cálculo de tokens_entrada en caso de error,
             # o solo incluir la pregunta. Para este ejemplo, seremos conservadores.
-            # Si el error ocurre antes del nodo 'generate', SISTEMA_PROMPT_BASE y docs_content_final no se habrían usado.
+            # Si el error ocurre antes del nodo 'generate', get_sistema_prompt_base() y docs_content_final no se habrían usado.
             # El `token_summary` ya usa los tokens que se le pasan, así que el log será coherente.
 
-            # Se usa la constante global SISTEMA_PROMPT_BASE para el cálculo en caso de error
-            tokens_prompt_sistema_base_error = contar_tokens(SISTEMA_PROMPT_BASE, model_name) 
-            # tokens_entrada_error += tokens_prompt_sistema_base_error # Decidir si sumarlo
-            # log_message(f"Tokens del prompt base del sistema (en error): {tokens_prompt_sistema_base_error}")
+            # Se usa get_sistema_prompt_base()[0] para el cálculo en caso de error
+            tokens_prompt_sistema_base_error = contar_tokens(get_sistema_prompt_base()[0], model_name)
 
             # No intentaremos extraer docs_content_final en caso de error general, ya que el grafo pudo no completarse.
 
@@ -644,6 +593,8 @@ Pregunta: {request.question_input}
                     tokens_input=tokens_entrada_error, # Usar tokens_entrada_error
                     tokens_output=tokens_salida_error,  # Usar tokens_salida_error
                     tiempo_respuesta_ms=tiempo_respuesta_ms,
+                    id_prompt_usado=current_prompt_id,  # Usar ID del prompt en lugar de versión
+                    comentario=None,  # Por ahora sin comentario
                     error_detectado=True,
                     tipo_error="Error en procesamiento",
                     mensaje_error=str(e),
@@ -706,15 +657,166 @@ class ConsultaAdminItem(BaseModel):
     respuesta_asistente_truncada: str
     respuesta_es_vacia: bool
     respuesta_util: str # Cambiado de bool a str para soportar "si", "no", "nada"
+    tokens_input: int
+    tokens_output: int
+    tiempo_respuesta_ms: int
+
+# Modelo Pydantic para la solicitud de comentarios
+class CommentRequest(BaseModel):
+    id_consulta: int
+    comentario: str
+
+@router.post("/comentario", summary="Registrar comentario para una consulta")
+async def handle_comentario(request: CommentRequest):
+    logger.info("--- INICIO Endpoint /api/comentario ---")
+    logger.info(f"Recibida solicitud de comentario RAW: {request}")
+
+    id_consulta = request.id_consulta
+    comentario_texto = request.comentario.strip()
+    logger.info(f"Procesando comentario para id_consulta: {id_consulta}, comentario: {comentario_texto[:50]}...")
+
+    if not comentario_texto:
+        logger.warning(f"Comentario vacío para id_consulta: {id_consulta}")
+        raise HTTPException(status_code=400, detail="El comentario no puede estar vacío.")
+
+    if len(comentario_texto) > 255:
+        logger.warning(f"Comentario muy largo para id_consulta: {id_consulta} (longitud: {len(comentario_texto)})")
+        raise HTTPException(status_code=400, detail="El comentario no puede exceder 255 caracteres.")
+
+    conn = None 
+    try:
+        logger.info(f"Intentando obtener conexión a la BD para comentario (id_consulta: {id_consulta})")
+        conn = get_admin_db_connection() 
+        if not conn:
+            logger.error(f"Fallo al conectar a la BD para comentario (id_consulta: {id_consulta})")
+            raise HTTPException(status_code=503, detail="Error de conexión a la base de datos.")
+
+        logger.info(f"Conexión a BD exitosa para comentario (id_consulta: {id_consulta})")
+        cursor = conn.cursor()
+        
+        # Detectar el tipo de BD real
+        db_type_real = "sqlite"  # Por defecto SQLite
+        try:
+            if hasattr(conn, 'server_version'):  # Atributo específico de pymysql
+                db_type_real = "mysql"
+            elif str(type(conn)).find('sqlite') != -1:  # Verificar si es SQLite
+                db_type_real = "sqlite"
+        except:
+            db_type_real = "sqlite"  # Fallback a SQLite
+            
+        logger.info(f"Tipo de BD real detectado: {db_type_real}")
+
+        # Primero verificar si existe la consulta
+        if db_type_real == 'mysql':
+            check_query = "SELECT id_consulta FROM consultas WHERE id_consulta = %s"
+            cursor.execute(check_query, (id_consulta,))
+        else:  # sqlite
+            check_query = "SELECT id_consulta FROM consultas WHERE id_consulta = ?"
+            cursor.execute(check_query, (id_consulta,))
+        
+        existing_record = cursor.fetchone()
+        if not existing_record:
+            logger.warning(f"No se encontró consulta con id_consulta={id_consulta}")
+            raise HTTPException(status_code=404, detail=f"No se encontró la consulta con ID {id_consulta}.")
+
+        logger.info(f"Consulta {id_consulta} encontrada, procediendo con el update de comentario")
+
+        # Realizar el UPDATE
+        if db_type_real == 'mysql':
+            sql_update_query = """
+                UPDATE consultas
+                SET comentario = %s
+                WHERE id_consulta = %s
+            """
+            params_tuple = (comentario_texto, id_consulta)
+        else:  # sqlite
+            sql_update_query = """
+                UPDATE consultas
+                SET comentario = ?
+                WHERE id_consulta = ?
+            """
+            params_tuple = (comentario_texto, id_consulta)
+        
+        logger.info(f"Ejecutando UPDATE para comentario (id_consulta: {id_consulta}): Query: {sql_update_query.strip()} con Params: {params_tuple}")
+        cursor.execute(sql_update_query, params_tuple)
+        
+        rows_affected = cursor.rowcount if hasattr(cursor, 'rowcount') else 1
+        logger.info(f"Filas afectadas por el UPDATE: {rows_affected}")
+        
+        conn.commit()
+        logger.info(f"Commit de la transacción realizado para comentario (id_consulta: {id_consulta})")
+
+        # Verificar que el update fue exitoso
+        if db_type_real == 'mysql':
+            verify_query = "SELECT comentario FROM consultas WHERE id_consulta = %s"
+            cursor.execute(verify_query, (id_consulta,))
+        else:  # sqlite
+            verify_query = "SELECT comentario FROM consultas WHERE id_consulta = ?"
+            cursor.execute(verify_query, (id_consulta,))
+        
+        updated_record = cursor.fetchone()
+        if updated_record:
+            if isinstance(updated_record, dict):  # MySQL
+                actual_value = updated_record['comentario']
+            else:  # SQLite
+                actual_value = updated_record[0]
+            
+            logger.info(f"Verificación: comentario actualizado para id_consulta: {id_consulta}")
+            
+            if actual_value == comentario_texto:
+                logger.info(f"Comentario actualizado correctamente para id_consulta: {id_consulta}")
+                return {
+                    "status": "success", 
+                    "message": "Comentario guardado correctamente", 
+                    "id_consulta": id_consulta, 
+                    "comentario_guardado": comentario_texto
+                }
+            else:
+                logger.error(f"Error: el comentario no se actualizó correctamente para id_consulta: {id_consulta}")
+                raise HTTPException(status_code=500, detail="Error al actualizar el comentario en la base de datos.")
+        else:
+            logger.error(f"Error: no se pudo verificar la actualización del comentario para id_consulta: {id_consulta}")
+            raise HTTPException(status_code=500, detail="Error al verificar la actualización del comentario.")
+
+    except HTTPException as http_exc:
+        logger.error(f"HTTPException en /api/comentario (id_consulta: {id_consulta}): {http_exc.detail}")
+        raise http_exc 
+    except Exception as e:
+        if conn:
+            logger.info(f"Realizando rollback debido a excepción en /api/comentario (id_consulta: {id_consulta})")
+            try:
+                conn.rollback()
+            except Exception as rollback_error:
+                logger.error(f"Error durante rollback: {rollback_error}")
+        
+        logger.error(f"Error EXCEPCIÓN GENERAL al actualizar comentario para id_consulta {id_consulta}: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail="Error interno del servidor al procesar comentario.")
+    finally:
+        if conn:
+            try:
+                cursor.close()
+            except Exception as close_error:
+                logger.error(f"Error al cerrar cursor: {close_error}")
+            try:
+                conn.close()
+            except Exception as close_error:
+                logger.error(f"Error al cerrar conexión: {close_error}")
+            logger.info(f"Conexión a BD (comentario) cerrada para id_consulta: {id_consulta}")
+        logger.info("--- FIN Endpoint /api/comentario ---")
 
 # --- Función de conexión a la BD (similar a la anterior, pero sin ser parte de Flask) ---
 def get_admin_db_connection():
     conn = None
     db_type_admin = os.getenv('DB_TYPE', 'sqlite') # Usar una variable diferente o la misma si la config es igual
     
+    logger.info(f"get_admin_db_connection: Intentando conectar con DB_TYPE={db_type_admin}")
+    
     # Intentar con MySQL primero si está configurado
     if db_type_admin == 'mysql':
         try:
+            logger.info(f"Intentando conexión MySQL: host={os.getenv('BD_SERVER')}, port={os.getenv('BD_PORT', 3306)}, user={os.getenv('BD_USER')}, db={os.getenv('BD_NAME')}")
+            
             conn = pymysql.connect(
                 host=os.getenv('BD_SERVER'),
                 port=int(os.getenv('BD_PORT', 3306)),
@@ -723,15 +825,26 @@ def get_admin_db_connection():
                 database=os.getenv('BD_NAME'),
                 charset='utf8mb4',
                 cursorclass=pymysql.cursors.DictCursor, # Devuelve filas como diccionarios
-                connect_timeout=60
+                connect_timeout=60,
+                autocommit=False  # Asegurarse de que autocommit esté desactivado
             )
-            logger.info("Conectado a MySQL para admin.")
+            
+            # Verificar la conexión
+            with conn.cursor() as test_cursor:
+                test_cursor.execute("SELECT 1 as test")
+                test_result = test_cursor.fetchone()
+                logger.info(f"Test de conexión MySQL exitoso: {test_result}")
+            
+            logger.info("Conectado a MySQL para admin exitosamente.")
             return conn
+            
         except Exception as e:
             logger.error(f"Error al conectar a MySQL para admin: {e}")
             logger.error(traceback.format_exc())
             logger.info("Intentando con SQLite como alternativa...")
             # No retornar aún, intentar con SQLite
+    else:
+        logger.info("DB_TYPE no es mysql, usando SQLite directamente.")
     
     # Si no es MySQL o falló la conexión a MySQL, intentar con SQLite
     try:
@@ -739,6 +852,8 @@ def get_admin_db_connection():
         # Esta ruta es relativa al punto de ejecución del script.
         # Si .env define SQLITE_PATH, debería ser una ruta absoluta o relativa al CWD.
         sqlite_path_admin = os.getenv('SQLITE_PATH', 'BD_RELA/local_database.db')
+        
+        logger.info(f"Intentando conexión SQLite con path: {sqlite_path_admin}")
         
         # Verificar si el archivo existe
         if not os.path.exists(sqlite_path_admin):
@@ -754,12 +869,21 @@ def get_admin_db_connection():
                     sqlite_path_admin = alt_path
                     logger.info(f"Found SQLite database at alternate location: {sqlite_path_admin}")
                     break
-
+        
         conn = sqlite3.connect(sqlite_path_admin)
         conn.row_factory = sqlite3.Row # Para acceder a columnas por nombre
         conn.execute("PRAGMA foreign_keys = ON")
+        
+        # Verificar la conexión
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 as test")
+        test_result = cursor.fetchone()
+        logger.info(f"Test de conexión SQLite exitoso: {test_result}")
+        cursor.close()
+        
         logger.info(f"Conectado a SQLite para admin en: {sqlite_path_admin}")
         return conn
+        
     except Exception as e:
         logger.error(f"Error al conectar a SQLite para admin: {e}")
         logger.error(traceback.format_exc())
@@ -775,10 +899,22 @@ async def obtener_consultas_filtradas_admin(
 ):
     try:
         conn = get_admin_db_connection()
+        if not conn:
+            logger.error("OBTENER_CONSULTAS_FILTRADAS: No se pudo obtener conexión a la BD.")
+            raise HTTPException(status_code=503, detail="Error de conexión a la base de datos.")
+            
         cursor = conn.cursor()
 
+        # Determinar el tipo de base de datos activa para esta conexión
+        db_type_actual = 'sqlite'  # Valor por defecto
+        if hasattr(conn, 'server_version'):  # pymysql.connections.Connection tiene 'server_version'
+            db_type_actual = 'mysql'
+        
+        logger.info(f"OBTENER_CONSULTAS_FILTRADAS: Tipo de BD detectado para construcción de query: {db_type_actual}")
+        placeholder = '?' if db_type_actual == 'sqlite' else '%s'
+
         # Construir la consulta SQL base
-        query = """
+        base_query_select_part = """
             SELECT 
                 id_consulta,
                 timestamp,
@@ -789,33 +925,44 @@ async def obtener_consultas_filtradas_admin(
                 respuesta_es_vacia,
                 respuesta_util,
                 tokens_input,
-                tokens_output
-            FROM consultas 
-            WHERE 1=1
+                tokens_output,
+                tiempo_respuesta_ms
+            FROM consultas
         """
-        params = []
+        
+        conditions = []
+        current_params = []
 
         # Agregar filtros según los parámetros recibidos
         if fecha_desde:
-            query += " AND DATE(timestamp) >= ?"
-            params.append(fecha_desde)
+            conditions.append(f"DATE(timestamp) >= {placeholder}")
+            current_params.append(fecha_desde)
         
         if fecha_hasta:
-            query += " AND DATE(timestamp) <= ?"
-            params.append(fecha_hasta)
+            conditions.append(f"DATE(timestamp) <= {placeholder}")
+            current_params.append(fecha_hasta)
         
         if respuesta_es_vacia is not None:
-            query += " AND respuesta_es_vacia = ?"
-            params.append(respuesta_es_vacia)
+            conditions.append(f"respuesta_es_vacia = {placeholder}")
+            current_params.append(respuesta_es_vacia)
         
-        if respuesta_util is not None:
-            query += " AND respuesta_util = ?"
-            params.append(respuesta_util)
+        # Asegurarse que el filtro respuesta_util solo se aplique si tiene un valor relevante
+        if respuesta_util is not None and respuesta_util != "": 
+            conditions.append(f"respuesta_util = {placeholder}")
+            current_params.append(respuesta_util)
 
-        # Ordenar por timestamp descendente
-        query += " ORDER BY timestamp DESC"
+        if conditions:
+            final_query = base_query_select_part + " WHERE " + " AND ".join(conditions)
+        else:
+            # Si no hay condiciones, se seleccionan todos los registros
+            final_query = base_query_select_part
+            
+        final_query += " ORDER BY timestamp DESC"
 
-        cursor.execute(query, params)
+        logger.info(f"OBTENER_CONSULTAS_FILTRADAS: Query final: {final_query}")
+        logger.info(f"OBTENER_CONSULTAS_FILTRADAS: Parámetros: {tuple(current_params)}")
+
+        cursor.execute(final_query, tuple(current_params))
         rows = cursor.fetchall()
         
         # Procesar los resultados
@@ -838,7 +985,8 @@ async def obtener_consultas_filtradas_admin(
                     "respuesta_es_vacia": bool(row['respuesta_es_vacia']),
                     "respuesta_util": row['respuesta_util'] if row['respuesta_util'] is not None else "nada",
                     "tokens_input": row['tokens_input'] if row['tokens_input'] is not None else 0,
-                    "tokens_output": row['tokens_output'] if row['tokens_output'] is not None else 0
+                    "tokens_output": row['tokens_output'] if row['tokens_output'] is not None else 0,
+                    "tiempo_respuesta_ms": row['tiempo_respuesta_ms'] if row['tiempo_respuesta_ms'] is not None else 0
                 }
             else:
                 # SQLite con Row o tupla
@@ -856,7 +1004,8 @@ async def obtener_consultas_filtradas_admin(
                     "respuesta_es_vacia": bool(row[6]),
                     "respuesta_util": row[7] if row[7] is not None else "nada",
                     "tokens_input": row[8] if row[8] is not None else 0,
-                    "tokens_output": row[9] if row[9] is not None else 0
+                    "tokens_output": row[9] if row[9] is not None else 0,
+                    "tiempo_respuesta_ms": row[10] if row[10] is not None else 0
                 }
             
             results.append(result)
@@ -897,31 +1046,42 @@ async def handle_feedback(request: FeedbackRequest):
             raise HTTPException(status_code=503, detail="Error de conexión a la base de datos.")
 
         logger.info(f"Conexión a BD exitosa para feedback (id_consulta: {id_consulta})")
-        cursor = conn.cursor()
         
         # Detectar el tipo de BD real basándose en la conexión, no en la variable de entorno
         # Esto es importante porque DB_TYPE puede ser 'mysql' pero usar SQLite como fallback
         db_type_real = "sqlite"  # Por defecto SQLite
         try:
-            # Intentar detectar si es MySQL verificando el tipo de conexión
+            # Método más robusto para detectar el tipo de conexión
             if hasattr(conn, 'server_version'):  # Atributo específico de pymysql
                 db_type_real = "mysql"
+                logger.info(f"Detectado MySQL con server_version: {conn.server_version}")
             elif str(type(conn)).find('sqlite') != -1:  # Verificar si es SQLite
                 db_type_real = "sqlite"
-        except:
+                logger.info(f"Detectado SQLite: {type(conn)}")
+            elif hasattr(conn, 'get_server_info'):  # Método alternativo para MySQL
+                db_type_real = "mysql"
+                logger.info(f"Detectado MySQL con get_server_info: {conn.get_server_info()}")
+        except Exception as detect_error:
+            logger.warning(f"Error al detectar tipo de BD, usando SQLite por defecto: {detect_error}")
             db_type_real = "sqlite"  # Fallback a SQLite
             
         logger.info(f"Tipo de BD real detectado: {db_type_real}")
 
+        cursor = conn.cursor()
+
         # Primero verificar si existe la consulta
         if db_type_real == 'mysql':
             check_query = "SELECT id_consulta FROM consultas WHERE id_consulta = %s"
+            logger.info(f"Ejecutando query de verificación MySQL: {check_query} con parámetro: {id_consulta}")
             cursor.execute(check_query, (id_consulta,))
         else:  # sqlite
             check_query = "SELECT id_consulta FROM consultas WHERE id_consulta = ?"
+            logger.info(f"Ejecutando query de verificación SQLite: {check_query} con parámetro: {id_consulta}")
             cursor.execute(check_query, (id_consulta,))
         
         existing_record = cursor.fetchone()
+        logger.info(f"Resultado de verificación: {existing_record}")
+        
         if not existing_record:
             logger.warning(f"No se encontró consulta con id_consulta={id_consulta}")
             raise HTTPException(status_code=404, detail=f"No se encontró la consulta con ID {id_consulta}.")
@@ -945,29 +1105,41 @@ async def handle_feedback(request: FeedbackRequest):
             params_tuple = (respuesta_util_valor, id_consulta)
         
         logger.info(f"Ejecutando UPDATE para feedback (id_consulta: {id_consulta}): Query: {sql_update_query.strip()} con Params: {params_tuple}")
-        cursor.execute(sql_update_query, params_tuple)
         
-        # Para SQLite, verificar el número de filas afectadas
-        rows_affected = cursor.rowcount if hasattr(cursor, 'rowcount') else 1
-        logger.info(f"Filas afectadas por el UPDATE: {rows_affected}")
-        
-        conn.commit()
-        logger.info(f"Commit de la transacción realizado para feedback (id_consulta: {id_consulta})")
+        try:
+            cursor.execute(sql_update_query, params_tuple)
+            rows_affected = cursor.rowcount if hasattr(cursor, 'rowcount') else 1
+            logger.info(f"Filas afectadas por el UPDATE: {rows_affected}")
+            
+            # Commit de la transacción
+            conn.commit()
+            logger.info(f"Commit de la transacción realizado para feedback (id_consulta: {id_consulta})")
+            
+        except Exception as update_error:
+            logger.error(f"Error durante el UPDATE: {update_error}")
+            logger.error(traceback.format_exc())
+            raise
 
         # Verificar que el update fue exitoso consultando el registro actualizado
         if db_type_real == 'mysql':
             verify_query = "SELECT respuesta_util FROM consultas WHERE id_consulta = %s"
+            logger.info(f"Ejecutando query de verificación MySQL: {verify_query} con parámetro: {id_consulta}")
             cursor.execute(verify_query, (id_consulta,))
         else:  # sqlite
             verify_query = "SELECT respuesta_util FROM consultas WHERE id_consulta = ?"
+            logger.info(f"Ejecutando query de verificación SQLite: {verify_query} con parámetro: {id_consulta}")
             cursor.execute(verify_query, (id_consulta,))
         
         updated_record = cursor.fetchone()
+        logger.info(f"Resultado de verificación después del update: {updated_record}")
+        
         if updated_record:
             if isinstance(updated_record, dict):  # MySQL
                 actual_value = updated_record['respuesta_util']
+                logger.info(f"Valor extraído de dict (MySQL): {actual_value}")
             else:  # SQLite
-                actual_value = updated_record[0]
+                actual_value = updated_record[0] if isinstance(updated_record, tuple) else updated_record['respuesta_util']
+                logger.info(f"Valor extraído de row (SQLite): {actual_value}")
             
             logger.info(f"Verificación: respuesta_util actualizada a '{actual_value}' para id_consulta: {id_consulta}")
             
@@ -975,9 +1147,10 @@ async def handle_feedback(request: FeedbackRequest):
                 logger.info(f"Feedback actualizado correctamente para id_consulta: {id_consulta}")
                 return {
                     "status": "success", 
-                    "message": "Gracias por tu opinión. Nos ayuda a mejorar!", 
+                    "message": "Gracias por tu opinión!", 
                     "id_consulta": id_consulta, 
-                    "respuesta_util_actualizada": respuesta_util_valor
+                    "respuesta_util_actualizada": respuesta_util_valor,
+                    "db_type": db_type_real  # Agregar para debugging
                 }
             else:
                 logger.error(f"Error: el valor no se actualizó correctamente. Esperado: {respuesta_util_valor}, Actual: {actual_value}")
@@ -994,20 +1167,24 @@ async def handle_feedback(request: FeedbackRequest):
             logger.info(f"Realizando rollback debido a excepción en /api/feedback (id_consulta: {id_consulta})")
             try:
                 conn.rollback()
+                logger.info("Rollback completado")
             except Exception as rollback_error:
                 logger.error(f"Error durante rollback: {rollback_error}")
         
         logger.error(f"Error EXCEPCIÓN GENERAL al actualizar feedback para id_consulta {id_consulta}: {str(e)}")
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail="Error interno del servidor al procesar feedback.")
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor al procesar feedback: {str(e)}")
     finally:
         if conn:
             try:
-                cursor.close()
+                if hasattr(conn, 'cursor') and cursor:
+                    cursor.close()
+                    logger.info("Cursor cerrado")
             except Exception as close_error:
                 logger.error(f"Error al cerrar cursor: {close_error}")
             try:
                 conn.close()
+                logger.info("Conexión cerrada")
             except Exception as close_error:
                 logger.error(f"Error al cerrar conexión: {close_error}")
             logger.info(f"Conexión a BD (feedback) cerrada para id_consulta: {id_consulta}")
@@ -1512,3 +1689,58 @@ async def obtener_stats_diarias(
     finally:
         if conn:
             conn.close()
+
+# Añadir endpoints de health check al final del archivo, antes de la última línea
+
+@router.get("/health", summary="Diagnóstico HTML del Sistema")
+async def health_check_html():
+    """
+    Endpoint que muestra un diagnóstico completo del sistema en formato HTML.
+    Verifica el estado de Uvicorn, Qdrant, bases de datos, OpenAI y scripts críticos.
+    """
+    return await health_check_endpoint()
+
+@router.get("/health/json", summary="Diagnóstico JSON del Sistema")
+async def health_check_data():
+    """
+    Endpoint que retorna el diagnóstico del sistema en formato JSON.
+    Útil para monitoreo automatizado o integración con otros sistemas.
+    """
+    return await health_check_json()
+
+@router.get("/status", summary="Estado Básico del Sistema")
+async def basic_status():
+    """
+    Endpoint simple que retorna el estado básico del sistema.
+    Útil para verificaciones rápidas de disponibilidad.
+    """
+    try:
+        from app.api.health_check import HealthChecker
+        checker = HealthChecker()
+        
+        # Hacer verificaciones básicas
+        uvicorn_check = checker.check_uvicorn_status()
+        qdrant_check = checker.check_qdrant_connection()
+        
+        if uvicorn_check["status"] == "OK" and qdrant_check["status"] == "OK":
+            return {
+                "status": "OK",
+                "message": "Sistema operativo",
+                "timestamp": datetime.datetime.now().isoformat(),
+                "components": {
+                    "uvicorn": "OK",
+                    "qdrant": "OK"
+                }
+            }
+        else:
+            return {
+                "status": "ERROR",
+                "message": "Sistema con problemas",
+                "timestamp": datetime.datetime.now().isoformat(),
+                "components": {
+                    "uvicorn": uvicorn_check["status"],
+                    "qdrant": qdrant_check["status"]
+                }
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error en verificación básica: {str(e)}")
