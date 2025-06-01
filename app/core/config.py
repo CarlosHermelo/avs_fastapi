@@ -67,7 +67,7 @@ model_name = os.environ.get('OPENAI_MODEL', '')
 if not model_name and 'DEFAULT' in config:
     model_name = config['DEFAULT'].get('modelo', 'gpt-3.5-turbo')
 
-# Priorizar la variable de entorno para la API key
+# Priorizar la variable de entorno para la API key, pero usar config.ini como fallback
 openai_api_key = os.environ.get('OPENAI_API_KEY', '')
 
 # Mostrar la API key que se está usando (solo primeros y últimos caracteres)
@@ -78,6 +78,13 @@ elif 'DEFAULT' in config:
     openai_api_key = config['DEFAULT'].get('openai_api_key', '').strip()
     key_preview = f"{openai_api_key[:5]}...{openai_api_key[-4:]}" if len(openai_api_key) > 9 else openai_api_key
     print(f"Usando OPENAI_API_KEY desde config.ini: {key_preview}")
+
+# API Keys adicionales desde config.ini
+tavily_api_key = ''
+cohere_api_key = ''
+if 'DEFAULT' in config:
+    tavily_api_key = config['DEFAULT'].get('tavily_api_key', '')
+    cohere_api_key = config['DEFAULT'].get('cohere_api_key', '')
 
 # Solo mostrar información sensible en entorno de desarrollo
 if openai_api_key and os.environ.get('ENVIRONMENT', '').lower() != 'production':
