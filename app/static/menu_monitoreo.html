@@ -12,7 +12,6 @@
   <div class="flex min-h-screen flex-col" style="font-family: Inter, 'Noto Sans', sans-serif;">
     <header class="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4 shadow-sm">
       <div class="flex items-center gap-3">
-        
         <h1 class="text-xl font-semibold text-slate-900">PAMI</h1>
       </div>
       <h2 class="text-lg font-medium text-slate-700">Monitoreo Asistente Virtual SIMAP</h2>
@@ -26,10 +25,10 @@
     </header>
 
     <main class="flex flex-1 flex-col items-center justify-center p-8">
-      <div class="w-full max-w-4xl rounded-xl bg-white p-8 shadow-lg">
+      <div class="w-full max-w-6xl rounded-xl bg-white p-8 shadow-lg">
         <div class="mb-12 text-center"></div>
 
-        <div class="grid grid-cols-1 gap-8 md:grid-cols-3">
+        <div class="grid grid-cols-1 gap-8 md:grid-cols-4">
           <a class="group flex flex-col items-center justify-center rounded-lg border border-slate-200 bg-slate-50 p-8 text-center shadow-sm transition-all hover:shadow-xl hover:border-[#1672ce] hover:bg-white" href="consulta_estadistica.html">
             <span class="material-icons mb-4 text-5xl text-[#1672ce]">bar_chart</span>
             <h4 class="text-xl font-semibold text-slate-800">Estadísticas</h4>
@@ -44,6 +43,11 @@
             <span class="material-icons mb-4 text-5xl text-[#1672ce]">model_training</span>
             <h4 class="text-xl font-semibold text-slate-800">Evaluación de Entrenamiento</h4>
             <p class="mt-2 text-sm text-slate-600">Revisa y califica el rendimiento del entrenamiento.</p>
+          </a>
+          <a class="group flex flex-col items-center justify-center rounded-lg border border-slate-200 bg-slate-50 p-8 text-center shadow-sm transition-all hover:shadow-xl hover:border-[#1672ce] hover:bg-white" href="http://localhost:8000/api/health" target="_blank">
+            <span class="material-icons mb-4 text-5xl text-[#1672ce]">healing</span>
+            <h4 class="text-xl font-semibold text-slate-800">Diagnóstico</h4>
+            <p class="mt-2 text-sm text-slate-600">Verifica el estado de la API y del sistema.</p>
           </a>
         </div>
       </div>

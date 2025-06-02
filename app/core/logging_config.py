@@ -6,20 +6,17 @@ import sys
 import traceback
 from logging.handlers import RotatingFileHandler
 
-# Configurar el directorio de logs (usando un path absoluto y accesible)
+# Configurar el directorio de logs (SIEMPRE usar la carpeta logs)
 try:
     # Obtener el directorio base (raíz del proyecto)
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     print(f"Directorio base: {base_dir}")
     
-    # Directorio de logs principal
+    # Directorio de logs principal - FORZAR siempre logs/
     log_dir = os.path.join(base_dir, 'logs')
-    print(f"Directorio de logs principal: {log_dir}")
+    print(f"Directorio de logs: {log_dir}")
     
-    # Directorio alternativo por si falla (directamente en la raíz)
-    alt_log_dir = base_dir
-    
-    # Intentar crear el directorio principal de logs
+    # SIEMPRE crear el directorio de logs, no hay directorio alternativo
     os.makedirs(log_dir, exist_ok=True)
     print(f"Directorio de logs creado/verificado en: {log_dir}")
     
@@ -32,15 +29,22 @@ try:
         print(f"Permisos de escritura verificados en: {log_dir}")
     except Exception as e:
         print(f"ERROR: Sin permisos de escritura en {log_dir}: {str(e)}")
-        log_dir = alt_log_dir
-        print(f"Usando directorio alternativo: {log_dir}")
+        # FORZAR la creación del directorio con permisos
+        try:
+            os.makedirs(log_dir, mode=0o755, exist_ok=True)
+            print(f"Directorio de logs recreado con permisos en: {log_dir}")
+        except Exception as e2:
+            print(f"ERROR CRÍTICO: No se puede crear directorio de logs: {str(e2)}")
+            raise Exception(f"No se puede configurar logging en {log_dir}")
         
 except Exception as e:
     print(f"ERROR al configurar directorio de logs: {str(e)}")
     traceback.print_exc()
-    # Usar el directorio actual si todo falla
-    log_dir = '.'
-    print(f"Usando directorio actual para logs: {log_dir}")
+    # NUNCA usar el directorio actual como fallback
+    # En su lugar, usar una carpeta logs en el directorio de trabajo actual
+    log_dir = os.path.join(os.getcwd(), 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    print(f"Usando directorio de logs en CWD: {log_dir}")
 
 # Archivo de log con fecha específica
 log_date = datetime.datetime.now().strftime("%Y%m%d")
@@ -88,6 +92,8 @@ def setup_logger():
     except Exception as e:
         print(f"ERROR al configurar file handler: {str(e)}")
         traceback.print_exc()
+        # Si no se puede crear el log file, fallar completamente
+        raise Exception(f"No se puede configurar el logging correctamente: {str(e)}")
     
     # Configurar el console handler (siempre funcionará)
     console_handler = logging.StreamHandler()

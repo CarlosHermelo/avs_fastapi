@@ -12,14 +12,25 @@ env/
 venv/
 ENV/
 *.env
+.env.*
+!env.example
 
 # Archivos de configuración con secretos
 config.ini
 *.ini
 secrets/
+*.backup
+.env.backup
+.env.local
+.env.production
 
-# Archivos de log
+# Archivos de log - TODOS los logs deben ignorarse
 *.log
+logs/
+log/
+app*.log
+debug*.log
+uvicorn*.log
 
 # Archivos de caché
 .pytest_cache/
@@ -38,6 +49,17 @@ Thumbs.db
 
 # Archivos de Docker
 .dockerignore
+
+# API Keys y archivos sensibles
+*api_key*
+*secret*
+*password*
+credentials*
+
+# Base de datos locales
+*.db
+*.sqlite
+*.sqlite3
 
 # Otros archivos
 *.bak

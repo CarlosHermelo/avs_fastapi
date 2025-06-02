@@ -48,8 +48,8 @@ try:
     config_path = find_config_file()
     print(f"Cargando configuración desde: {config_path}")
     
-    # Leer el archivo de configuración manualmente para manejar API keys multilínea
-    with open(config_path, 'r') as f:
+    # Leer el archivo de configuración manualmente para manejar API keys multilínea y BOM
+    with open(config_path, 'r', encoding='utf-8-sig') as f:
         content = f.read()
     
     # Eliminar saltos de línea en la API key
